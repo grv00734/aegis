@@ -79,6 +79,24 @@ function cmdGui(flags: Record<string, string>): void {
   if (flags.open === "true") openBrowser(`http://${cfg.host}:${guiPort}`);
 }
 
+function cmdPitch(flags: Record<string, string>): void {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const deck = resolve(here, "..", "pitch", "index.html");
+  if (!existsSync(deck)) {
+    console.error(`Pitch deck not found at ${deck}`);
+    process.exitCode = 1;
+    return;
+  }
+  const url = `file://${deck}`;
+  const r = launchApp(url, "1280,820", "aegis-pitch-profile");
+  if (r.launched) {
+    console.log(`  Opened the Aegis pitch deck (${r.browser}). Arrow keys to navigate, F for fullscreen.`);
+  } else {
+    console.log(`  Open the deck in your browser:\n    ${deck}`);
+    if (flags.open === "true") openBrowser(url);
+  }
+}
+
 function cmdApp(flags: Record<string, string>): void {
   const cfg = loadConfig(flags.config);
   const guiPort = flags.port ? Number(flags.port) : 8799;
@@ -329,6 +347,9 @@ function main(): void {
     case "app":
       cmdApp(flags);
       break;
+    case "pitch":
+      cmdPitch(flags);
+      break;
     case "transparent":
       cmdTransparent(flags);
       break;
@@ -359,6 +380,9 @@ Usage:
 
   aegis app    [--config <path>] [--port <n>]
       Open the control panel as a standalone desktop app window.
+
+  aegis pitch
+      Open the Aegis pitch deck as a presentation window.
 
   aegis gui    [--config <path>] [--port <n>] [--open]
       Launch the local web control panel (default http://127.0.0.1:8799).

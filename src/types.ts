@@ -35,6 +35,8 @@ export interface RouteConfig {
   matchPrefix: string;
   upstream: string;
   format: RouteFormat;
+  /** Per-route action override; falls back to the global mode. */
+  mode?: Mode;
 }
 
 export interface AegisConfig {
@@ -43,6 +45,10 @@ export interface AegisConfig {
   mode: Mode;
   /** If a match in any of these categories is found, the request is blocked regardless of mode. */
   blockOn: Category[];
+  /** Per-category action overrides, e.g. { secret: "block", pii: "redact" }. */
+  categoryActions?: Partial<Record<Category, Mode>>;
+  /** Literal values or /regex/ strings to never flag (false-positive suppression). */
+  allowlist?: string[];
   detectors: {
     secrets: boolean;
     pii: boolean;
@@ -51,6 +57,8 @@ export interface AegisConfig {
     network: boolean;
     dictionary: boolean;
     code: boolean;
+    /** Entropy-based detection of novel secrets (opt-in; higher false positives). */
+    entropy: boolean;
   };
   /** Optional local NER command for context-aware PII (offline). */
   nerCommand?: string;

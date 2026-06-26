@@ -14,6 +14,7 @@ import { Vault } from "./scrub/placeholders.js";
 import { startServer } from "./server.js";
 import { startMitmProxy } from "./mitm.js";
 import type { AuditEntry } from "./audit.js";
+import { buildReport } from "./report.js";
 import { dashboardHtml } from "./gui-page.js";
 
 interface SystemHandle {
@@ -44,6 +45,8 @@ class GuiState {
       blockOn: this.cfg.blockOn,
       detectors: this.cfg.detectors,
       dictionary: this.cfg.dictionary,
+      categoryActions: this.cfg.categoryActions ?? {},
+      allowlist: this.cfg.allowlist ?? [],
       mitmPort: this.cfg.mitm.port,
       transparentPort: this.cfg.mitm.transparentPort,
     };
@@ -96,6 +99,8 @@ class GuiState {
     if (partial.blockOn) this.cfg.blockOn = partial.blockOn;
     if (partial.detectors) this.cfg.detectors = { ...this.cfg.detectors, ...partial.detectors };
     if (partial.dictionary) this.cfg.dictionary = partial.dictionary;
+    if (partial.categoryActions !== undefined) this.cfg.categoryActions = partial.categoryActions;
+    if (partial.allowlist !== undefined) this.cfg.allowlist = partial.allowlist;
     this.scrubber = new Scrubber(this.cfg);
 
     // Re-apply to any running proxies.
@@ -175,6 +180,10 @@ export function startGui(cfg: AegisConfig, guiPort: number): Server {
       if (path === "/api/status") return json(res, 200, state.status());
 
       if (path === "/api/audit") return json(res, 200, { entries: state.audit });
+
+      if (path === "/api/report") {
+        return json(res, 200, buildReport(state.audit, { generatedAt: new Date().toISOString() }));
+      }
 
       if (path === "/api/events") {
         res.writeHead(200, {

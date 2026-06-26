@@ -5,13 +5,17 @@
   "mode": "redact",
   "blockOn": ["secret"],
 
+  "categoryActions": { "secret": "block", "pii": "redact", "network": "warn" },
+  "allowlist": ["AKIAIOSFODNN7EXAMPLE", "/@example\\.com$/"],
+
   "detectors": {
     "secrets": true,
     "pii": true,
     "identity": true,
     "network": true,
     "dictionary": true,
-    "code": true
+    "code": true,
+    "entropy": false
   },
 
   "scanResponses": true,
@@ -40,7 +44,8 @@
     {
       "matchPrefix": "/v1/messages",
       "upstream": "https://api.anthropic.com",
-      "format": "anthropic"
+      "format": "anthropic",
+      "mode": "redact"
     },
     {
       "matchPrefix": "/v1/chat/completions",

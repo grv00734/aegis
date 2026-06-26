@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>Aegis — Pitch</title>
+<style>
+  :root{
+    --blue:#0a84ff; --green:#34c759; --red:#ff453a; --amber:#ff9f0a;
+    --txt:#f5f5f7; --sub:rgba(235,235,245,.62); --glass:rgba(40,40,52,.5);
+    --stroke:rgba(255,255,255,.14);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{color:var(--txt);overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:
+      radial-gradient(circle at 12% 16%, #7b2ff7 0%, transparent 44%),
+      radial-gradient(circle at 88% 10%, #0a84ff 0%, transparent 46%),
+      radial-gradient(circle at 84% 90%, #16c2a3 0%, transparent 42%),
+      radial-gradient(circle at 16% 92%, #ff2d75 0%, transparent 44%),
+      #07070d;}
+  .progress{position:fixed;top:0;left:0;height:3px;background:var(--blue);width:0;z-index:10;transition:width .25s}
+  .deck{height:100%;position:relative}
+  .slide{position:absolute;inset:0;display:none;flex-direction:column;justify-content:center;
+    padding:6vh 9vw;opacity:0;transition:opacity .35s ease}
+  .slide.active{display:flex;opacity:1}
+  .eyebrow{font-size:14px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:var(--blue);margin-bottom:18px}
+  h1{font-size:clamp(40px,9vw,116px);font-weight:800;letter-spacing:-.02em;line-height:.98}
+  h2{font-size:clamp(28px,4.6vw,52px);font-weight:800;letter-spacing:-.01em;line-height:1.08;margin-bottom:22px;max-width:18ch}
+  .lede{font-size:clamp(17px,2.1vw,24px);color:var(--sub);max-width:60ch;line-height:1.5}
+  ul{list-style:none;display:flex;flex-direction:column;gap:14px;margin-top:8px}
+  li{font-size:clamp(16px,1.9vw,21px);line-height:1.45;padding-left:30px;position:relative;max-width:64ch}
+  li:before{content:"";position:absolute;left:0;top:.62em;width:11px;height:11px;border-radius:3px;background:var(--blue)}
+  li b{color:#fff}
+  .sub{color:var(--sub)}
+  .grid{display:grid;gap:16px;margin-top:10px}
+  .g3{grid-template-columns:repeat(3,1fr)} .g2{grid-template-columns:repeat(2,1fr)}
+  .card{background:var(--glass);border:1px solid var(--stroke);border-radius:18px;padding:20px 22px;
+    backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%)}
+  .card h3{font-size:19px;margin-bottom:8px}
+  .card p{font-size:15px;color:var(--sub);line-height:1.45}
+  .card .n{font-size:36px;font-weight:800;color:var(--green)}
+  table{border-collapse:collapse;margin-top:18px;font-size:clamp(14px,1.7vw,19px);width:100%;max-width:980px}
+  th,td{padding:12px 14px;border-bottom:1px solid var(--stroke);text-align:left}
+  th{color:var(--sub);font-weight:600} td.c,th.c{text-align:center}
+  .yes{color:var(--green);font-weight:700}.no{color:var(--red);font-weight:700}.na{color:var(--sub)}
+  .me{background:rgba(10,132,255,.14)}
+  .flow{display:flex;align-items:stretch;gap:14px;flex-wrap:wrap;margin-top:18px}
+  .node{flex:1;min-width:150px;background:var(--glass);border:1px solid var(--stroke);border-radius:16px;
+    padding:18px;text-align:center;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+  .node .t{font-weight:700;font-size:18px}.node .d{font-size:13px;color:var(--sub);margin-top:4px}
+  .node.guard{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue),0 10px 30px rgba(10,132,255,.3)}
+  .arrow{align-self:center;color:var(--sub);font-size:24px}
+  .codewrap{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+  pre{background:rgba(0,0,0,.42);border:1px solid var(--stroke);border-radius:14px;padding:16px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:clamp(11px,1.25vw,14px);
+    line-height:1.5;overflow:auto;white-space:pre-wrap;word-break:break-word}
+  pre .label{color:var(--sub);display:block;margin-bottom:8px;font-family:inherit}
+  .red{color:#ff8a80}.grn{color:#7ee29a}
+  .big{font-size:clamp(30px,5vw,60px);font-weight:800;line-height:1.05;max-width:20ch}
+  .foot{position:fixed;bottom:18px;left:9vw;right:9vw;display:flex;justify-content:space-between;
+    align-items:center;color:var(--sub);font-size:13px;letter-spacing:.04em}
+  .hint{opacity:.6}
+  .brandmark{font-weight:800;letter-spacing:.04em}
+  .pillrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:26px}
+  .pill{border:1px solid var(--stroke);background:var(--glass);border-radius:999px;padding:8px 16px;font-size:14px;color:var(--sub)}
+  .disc{font-size:12px;color:var(--sub);margin-top:18px;font-style:italic}
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<div class="deck" id="deck">
+
+  <!-- 1 -->
+  <section class="slide">
+    <div class="eyebrow">Confidential-data guard for AI</div>
+    <h1>AEGIS</h1>
+    <p class="lede" style="margin-top:26px">Stop your secrets from leaking to AI. The local layer that scrubs confidential company data out of every AI request — before it leaves the machine.</p>
+    <div class="pillrow">
+      <span class="pill">100% local detection</span>
+      <span class="pill">No API key</span>
+      <span class="pill">Works with any agent</span>
+      <span class="pill">Restores on reply</span>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section class="slide">
+    <div class="eyebrow">The problem</div>
+    <h2>Developers are pasting your crown jewels into someone else's AI.</h2>
+    <ul>
+      <li>AI coding agents — Claude Code, Cursor, Copilot, ChatGPT — are now <b>default developer tooling</b>.</li>
+      <li>To get help, people paste real <b>.env files, configs, logs, customer data, and source code</b> straight in.</li>
+      <li>Secrets, PII, and IP leave your network in seconds. Once sent, they may be logged, cached, or trained on — <b>the leak is irreversible</b>.</li>
+    </ul>
+    <p class="lede" style="margin-top:22px">The fastest-growing exfiltration channel in the enterprise has no guard on it.</p>
+  </section>
+
+  <!-- 3 -->
+  <section class="slide">
+    <div class="eyebrow">Why existing tools miss it</div>
+    <h2>Everyone guards the commit. No one guards the prompt.</h2>
+    <table>
+      <tr><th>Tool</th><th>What it watches</th></tr>
+      <tr><td>git-secrets / gitleaks</td><td class="sub">commits</td></tr>
+      <tr><td>GitGuardian / Cyberhaven</td><td class="sub">repos, SaaS connectors</td></tr>
+      <tr class="me"><td><b>Aegis</b></td><td><b>the request to the model</b></td></tr>
+    </table>
+    <p class="lede" style="margin-top:22px">By the time data reaches a commit, it has already been sent to a third-party model.</p>
+  </section>
+
+  <!-- 4 -->
+  <section class="slide">
+    <div class="eyebrow">Why now</div>
+    <h2>Adoption outran governance.</h2>
+    <div class="grid g3">
+      <div class="card"><h3>Shadow AI</h3><p>Agents went from novelty to daily driver in ~24 months. Security teams can't keep pace.</p></div>
+      <div class="card"><h3>Regulation</h3><p>GDPR, the EU AI Act, PCI DSS and HIPAA make uncontrolled data egress a board-level liability.</p></div>
+      <div class="card"><h3>Fragile trust</h3><p>One headline leak via an AI tool can freeze AI adoption across an entire company.</p></div>
+    </div>
+    <p class="lede" style="margin-top:24px">Traffic across the data/AI boundary is exploding — and the boundary is undefended.</p>
+  </section>
+
+  <!-- 5 -->
+  <section class="slide">
+    <div class="eyebrow">The solution</div>
+    <h2>A local guard between your people and any AI.</h2>
+    <div class="big" style="color:var(--blue);margin:6px 0 18px">Detect → Redact → Forward → Restore</div>
+    <ul>
+      <li>Detects secrets, PII, internal hosts, codenames, and confidential code — <b>on-device</b>.</li>
+      <li>Replaces them with placeholders <b>before the request leaves the machine</b>.</li>
+      <li><b>Restores</b> the real values in the reply — the developer's workflow is unchanged.</li>
+      <li><b>No API key. No AI calls for detection. No data to any third party.</b></li>
+    </ul>
+  </section>
+
+  <!-- 6 -->
+  <section class="slide">
+    <div class="eyebrow">How it works</div>
+    <h2>The confidential values never cross the line.</h2>
+    <div class="flow">
+      <div class="node"><div class="t">AI Agent</div><div class="d">Claude Code · Cursor · curl</div></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node guard"><div class="t">Aegis</div><div class="d">detect + redact · restore on reply</div></div>
+      <div class="arrow">&rarr;</div>
+      <div class="node"><div class="t">AI Provider</div><div class="d">receives scrubbed request only</div></div>
+    </div>
+    <p class="lede" style="margin-top:24px">Detection runs locally (regex + dictionary + context-aware PII). Aegis never sees or stores the user's API key — it only forwards it.</p>
+  </section>
+
+  <!-- 7 -->
+  <section class="slide">
+    <div class="eyebrow">Coverage</div>
+    <h2>One layer. Every agent.</h2>
+    <div class="grid g2">
+      <div class="card"><h3>Base-URL proxy</h3><p>Agents that read ANTHROPIC_BASE_URL / OPENAI_BASE_URL.</p></div>
+      <div class="card"><h3>System proxy</h3><p>Anything honoring HTTPS_PROXY + a locally-trusted CA.</p></div>
+      <div class="card"><h3>Transparent (OS-level)</h3><p>iptables / pf redirect — catches apps with hardcoded endpoints.</p></div>
+      <div class="card"><h3>VS Code extension</h3><p>In-editor scanning + one-click guard for terminals.</p></div>
+    </div>
+    <p class="lede" style="margin-top:22px">If it talks to an AI, Aegis can guard it.</p>
+  </section>
+
+  <!-- 8 -->
+  <section class="slide">
+    <div class="eyebrow">See it</div>
+    <h2>Same answer for the developer. Nothing for the provider.</h2>
+    <div class="codewrap">
+      <pre><span class="label">Before — what the developer pastes</span>ANTHROPIC_API_KEY=<span class="red">sk-ant-abcd1234EFGH5678</span>
+DB=postgres://admin:<span class="red">S3cr3t</span>@db.acme-internal.com
+Customer <span class="red">Alice Smith</span>, card <span class="red">4242 4242 4242 4242</span></pre>
+      <pre><span class="label">After — what the AI provider receives</span>ANTHROPIC_API_KEY=<span class="grn">[[REDACTED:ANTHROPIC_KEY:1]]</span>
+DB=<span class="grn">[[REDACTED:DB_URI_PASSWORD:2]]</span>@...
+Customer <span class="grn">[[REDACTED:PERSON_NAME:3]]</span>, card <span class="grn">[[REDACTED:CREDIT_CARD:4]]</span></pre>
+    </div>
+    <p class="lede" style="margin-top:20px">Placeholders are restored on the way back, so the reply still makes sense.</p>
+  </section>
+
+  <!-- 9 -->
+  <section class="slide">
+    <div class="eyebrow">Enterprise coverage</div>
+    <h2>Beyond the boundary.</h2>
+    <div class="grid g3">
+      <div class="card"><h3>Context-aware PII</h3><p>Names, addresses, DOB, IBAN, passports — local, with an optional local NER model.</p></div>
+      <div class="card"><h3>Git-history scan</h3><p>Find secrets committed and later "removed" but still in history.</p></div>
+      <div class="card"><h3>Response scanning</h3><p>Catch secrets the model itself generates in its output.</p></div>
+      <div class="card"><h3>Compliance reports</h3><p>PCI DSS, HIPAA, GDPR, SOC2 — from your own local audit log.</p></div>
+      <div class="card"><h3>Central policy</h3><p>One shared file governs the dictionary, mode, and detectors fleet-wide.</p></div>
+      <div class="card"><h3>Dashboard + app</h3><p>Live control panel, redaction tester, and activity feed.</p></div>
+    </div>
+  </section>
+
+  <!-- 10 -->
+  <section class="slide">
+    <div class="eyebrow">Why we win</div>
+    <h2>We guard the path competitors don't — offline.</h2>
+    <table>
+      <tr><th></th><th class="c">git-secrets</th><th class="c">GitGuardian</th><th class="c me">Aegis</th></tr>
+      <tr><td>Guards the AI prompt</td><td class="c no">No</td><td class="c no">No</td><td class="c me yes">Yes</td></tr>
+      <tr><td>Scans AI responses</td><td class="c no">No</td><td class="c no">No</td><td class="c me yes">Yes</td></tr>
+      <tr><td>Restores values (zero friction)</td><td class="c na">n/a</td><td class="c na">n/a</td><td class="c me yes">Yes</td></tr>
+      <tr><td>Any agent + OS-level</td><td class="c no">No</td><td class="c no">No</td><td class="c me yes">Yes</td></tr>
+      <tr><td>Fully offline, no API key</td><td class="c yes">Yes</td><td class="c no">No</td><td class="c me yes">Yes</td></tr>
+      <tr><td>History · compliance · dashboard</td><td class="c na">Partial</td><td class="c yes">SaaS</td><td class="c me yes">Local</td></tr>
+    </table>
+  </section>
+
+  <!-- 11 -->
+  <section class="slide">
+    <div class="eyebrow">Market</div>
+    <h2>A new guard on an exploding boundary.</h2>
+    <div class="grid g3">
+      <div class="card"><div class="n">~$28B</div><p>Projected DLP market by 2030 (from ~$2–5B today).</p></div>
+      <div class="card"><div class="n">10s of M</div><p>Developers worldwide; AI-tool adoption already a majority and rising.</p></div>
+      <div class="card"><div class="n">New</div><p>AI security &amp; governance — a category forming right now.</p></div>
+    </div>
+    <p class="lede" style="margin-top:22px">Wedge: developers using AI agents. Expansion: every employee using any AI app, governed by one local layer.</p>
+    <p class="disc">Figures are industry estimates for framing — replace with sourced numbers before an external raise.</p>
+  </section>
+
+  <!-- 12 -->
+  <section class="slide">
+    <div class="eyebrow">Business model</div>
+    <h2>Land with developers. Expand to security teams.</h2>
+    <div class="grid g3">
+      <div class="card"><h3>Local core</h3><p>Free / open. Runs on every machine and drives bottoms-up adoption.</p></div>
+      <div class="card"><h3>Team plane</h3><p>Per-seat SaaS: central policy, fleet dashboards, audit aggregation, alerts.</p></div>
+      <div class="card"><h3>Enterprise</h3><p>SSO/RBAC, compliance reporting, managed local NER, support &amp; SLAs.</p></div>
+    </div>
+  </section>
+
+  <!-- 13 -->
+  <section class="slide">
+    <div class="eyebrow">Status</div>
+    <h2>A working product — not a concept.</h2>
+    <div class="grid g3">
+      <div class="card"><div class="n">4</div><p>Interception modes shipped (base-URL, system, transparent, VS Code).</p></div>
+      <div class="card"><div class="n">51</div><p>Automated tests passing.</p></div>
+      <div class="card"><div class="n">0</div><p>Bytes sent to any AI for detection. No API key required.</p></div>
+    </div>
+    <ul style="margin-top:22px">
+      <li>Redact + restore (incl. streaming), git-history scan, response scan, compliance reports.</li>
+      <li>Web dashboard + iOS-style desktop app, central policy, audit log.</li>
+    </ul>
+  </section>
+
+  <!-- 14 -->
+  <section class="slide">
+    <div class="eyebrow">Vision</div>
+    <h1 style="font-size:clamp(32px,6vw,76px);max-width:18ch">The control plane for enterprise AI usage.</h1>
+    <p class="lede" style="margin-top:24px">Start by guarding what developers send to coding agents. Become the local layer through which <b style="color:#fff">all</b> AI traffic in the company is governed — privately, on-device, by policy.</p>
+    <div class="pillrow"><span class="pill">Pilot with your security team</span><span class="pill">Contact: your-name@company.com</span></div>
+  </section>
+
+</div>
+
+<div class="foot">
+  <span class="brandmark">AEGIS</span>
+  <span class="hint">&larr; &rarr; or Space to navigate · F for fullscreen</span>
+  <span id="counter">1 / 14</span>
+</div>
+
+<script>
+  var slides=[].slice.call(document.querySelectorAll(".slide"));
+  var i=0;
+  function show(n){
+    i=Math.max(0,Math.min(slides.length-1,n));
+    slides.forEach(function(s,k){s.classList.toggle("active",k===i)});
+    document.getElementById("progress").style.width=((i+1)/slides.length*100)+"%";
+    document.getElementById("counter").textContent=(i+1)+" / "+slides.length;
+  }
+  function next(){show(i+1)} function prev(){show(i-1)}
+  document.addEventListener("keydown",function(e){
+    if(["ArrowRight","PageDown"," ","Spacebar"].indexOf(e.key)>=0){e.preventDefault();next()}
+    else if(["ArrowLeft","PageUp"].indexOf(e.key)>=0){e.preventDefault();prev()}
+    else if(e.key==="Home"){show(0)} else if(e.key==="End"){show(slides.length-1)}
+    else if(e.key==="f"||e.key==="F"){
+      if(document.fullscreenElement)document.exitFullscreen(); else document.documentElement.requestFullscreen()}
+  });
+  document.addEventListener("click",function(e){ (e.clientX < window.innerWidth*0.35)?prev():next() });
+  show(0);
+</script>
+</body>
+</html>

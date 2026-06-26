@@ -17,6 +17,7 @@
     "dev": "tsx src/cli.ts start",
     "start": "node dist/cli.js start",
     "app": "node dist/cli.js app",
+    "pitch": "node dist/cli.js pitch",
     "gui": "node dist/cli.js gui --open",
     "scan": "tsx src/cli.ts scan",
     "test": "vitest run",

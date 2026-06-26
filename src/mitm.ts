@@ -23,6 +23,7 @@ import { SseRestorer } from "./stream.js";
 import { AuditLog, type Action, type AuditEntry } from "./audit.js";
 import { CertAuthority, aegisHome } from "./ca.js";
 import { peekSni } from "./sni.js";
+import { decide } from "./policy.js";
 
 export interface Upstream {
   host: string;
@@ -221,10 +222,9 @@ export function startMitmProxy(cfg: AegisConfig, opts: MitmOptions = {}): MitmHa
         const vault = new Vault();
         const { body: scrubbed, matches } = scrubRequestBody(parsed, format, scrubber, vault);
         summary = summarize(matches);
-        const hitsBlock = matches.some((m) => cfg.blockOn.includes(m.category));
-        const shouldBlock = matches.length > 0 && (cfg.mode === "block" || hitsBlock);
+        const decision = decide(matches, cfg, cfg.mode);
 
-        if (shouldBlock) {
+        if (decision === "block") {
           action = "blocked";
           await audit.record({ ts: new Date().toISOString(), route: `${host}${path}`, format, mode: cfg.mode, action, summary });
           res.writeHead(403, { "content-type": "application/json" });
@@ -240,10 +240,10 @@ export function startMitmProxy(cfg: AegisConfig, opts: MitmOptions = {}): MitmHa
           return;
         }
 
-        if (cfg.mode === "warn") {
-          action = matches.length > 0 ? "warned" : "clean";
+        if (decision === "warn") {
+          action = "warned";
         } else {
-          action = matches.length > 0 ? "redacted" : "clean";
+          action = decision === "redact" ? "redacted" : "clean";
           forwardBody = JSON.stringify(scrubbed);
           if (matches.length > 0) responseVault = vault;
         }

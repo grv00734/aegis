@@ -338,6 +338,7 @@ flowchart LR
 | `network` | IPv4 addresses, internal hostnames (`*.internal`, `*.corp`, `*.svc.cluster.local`) |
 | `dictionary` | your codenames, customer names, internal domains (configured) |
 | `code` | `CONFIDENTIAL` / `PROPRIETARY` markers, internal package namespaces |
+| `entropy` | high-entropy novel tokens regex misses (opt-in; off by default) |
 
 ---
 
@@ -536,8 +537,8 @@ The page provides:
 - **Guard controls** — start/stop the base-URL and system proxies with live status indicators.
 - **Live redaction tester** — paste any text; see the findings and exactly what the AI would
   receive (scrubbed). Detection runs locally; nothing leaves the machine.
-- **Policy and detectors** — switch mode (redact/block/warn), toggle detector categories, and
-  edit the company dictionary, applied to running proxies immediately.
+- **Policy and detectors** — switch mode, toggle detector categories, set **per-category
+  actions**, edit the **dictionary** and **allowlist**, applied to running proxies immediately.
 - **Activity** — a live feed of redaction/block events (counts and types only, never values).
 
 ```text
@@ -603,12 +604,17 @@ sensible defaults are used. Generate one with `node dist/cli.js init`.
   "port": 8787,
   "host": "127.0.0.1",
 
-  "mode": "redact",            // redact | block | warn
+  "mode": "redact",            // redact | block | warn (global default)
   "blockOn": ["secret"],       // categories that hard-block regardless of mode
+
+  // Policy-as-code: per-category actions (strictest wins for mixed requests)
+  "categoryActions": { "secret": "block", "pii": "redact", "network": "warn" },
+  // False-positive suppression: literal values or /regex/ strings, never flagged
+  "allowlist": ["AKIAIOSFODNN7EXAMPLE", "/@example\\.com$/"],
 
   "detectors": {
     "secrets": true, "pii": true, "identity": true, "network": true,
-    "dictionary": true, "code": true
+    "dictionary": true, "code": true, "entropy": false
   },
   "scanResponses": true,        // also scan AI responses for new secrets
   "nerCommand": "",             // optional: a LOCAL NER command for context-aware PII
@@ -621,8 +627,8 @@ sensible defaults are used. Generate one with `node dist/cli.js init`.
   },
 
   "routes": [
-    { "matchPrefix": "/v1/messages",         "upstream": "https://api.anthropic.com", "format": "anthropic" },
-    { "matchPrefix": "/v1/chat/completions", "upstream": "https://api.openai.com",    "format": "openai" }
+    { "matchPrefix": "/v1/messages",         "upstream": "https://api.anthropic.com", "format": "anthropic", "mode": "redact" },
+    { "matchPrefix": "/v1/chat/completions", "upstream": "https://api.openai.com",    "format": "openai", "mode": "block" }
   ],
 
   "mitm": { "port": 8788, "transparentPort": 8443, "hosts": ["api.anthropic.com", "api.openai.com"] },
@@ -630,7 +636,22 @@ sensible defaults are used. Generate one with `node dist/cli.js init`.
 }
 ```
 
-Environment overrides: `AEGIS_PORT`, `AEGIS_HOST`, `AEGIS_MODE`, `AEGIS_HOME` (CA directory).
+Environment overrides: `AEGIS_PORT`, `AEGIS_HOST`, `AEGIS_MODE`, `AEGIS_HOME` (CA directory),
+`AEGIS_POLICY` (shared policy file).
+
+### Policy-as-code
+
+Actions resolve in layers, and for a request touching several categories the **strictest action
+wins** (`block` > `redact` > `warn`):
+
+1. `categoryActions[category]` — per-category override (e.g. `secret: block`, `pii: redact`)
+2. the route's own `mode` (per-route override)
+3. the global `mode`
+4. `blockOn` categories always escalate to `block`
+
+`allowlist` entries (literal values or `/regex/`) are suppressed before any of this, for
+false-positive control. A central team can govern all of the above from one shared file via
+`policyFile` / `AEGIS_POLICY`, merged authoritatively over local settings.
 
 ---
 
@@ -732,7 +753,8 @@ flowchart LR
 ```
 src/
   cli.ts            commands: start, proxy, transparent, status, ca, setup, scan, init
-  config.ts         config loader + DEFAULT_CONFIG
+  config.ts         config loader + DEFAULT_CONFIG + central policy merge
+  policy.ts         policy-as-code decisions (per-category / per-route actions)
   types.ts          shared types
   server.ts         base-URL proxy bootstrap
   proxy.ts          base-URL request handling (scrub, forward, restore) + /__aegis/health

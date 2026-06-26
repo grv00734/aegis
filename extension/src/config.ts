@@ -18,6 +18,7 @@ export function getConfig(): AegisConfig {
       network: c.get<boolean>("detectors.network", true),
       dictionary: c.get<boolean>("detectors.dictionary", true),
       code: c.get<boolean>("detectors.code", true),
+      entropy: c.get<boolean>("detectors.entropy", false),
     },
     dictionary: c.get<string[]>("dictionary", []),
     code: {

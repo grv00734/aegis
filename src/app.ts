@@ -63,13 +63,13 @@ export interface AppLaunch {
 }
 
 /** Open `url` in a dedicated app window. Returns whether a browser was launched. */
-export function launchApp(url: string, size = "560,820"): AppLaunch {
+export function launchApp(url: string, size = "560,820", profileName = "aegis-app-profile"): AppLaunch {
   const bin = findBrowser();
   if (!bin) return { launched: false };
 
   // A separate profile dir keeps the app window isolated from the user's
   // normal browsing session and guarantees a fresh, frameless window.
-  const profile = join(tmpdir(), "aegis-app-profile");
+  const profile = join(tmpdir(), profileName);
   const args = [
     `--app=${url}`,
     `--user-data-dir=${profile}`,

@@ -14,6 +14,7 @@ export const DEFAULT_CONFIG: AegisConfig = {
     network: true,
     dictionary: true,
     code: true,
+    entropy: false,
   },
   scanResponses: true,
   dictionary: [],

@@ -5,6 +5,7 @@ import { Vault } from "./scrub/placeholders.js";
 import { scrubRequestBody } from "./messages.js";
 import { SseRestorer } from "./stream.js";
 import { AuditLog, type Action, type AuditEntry } from "./audit.js";
+import { decide } from "./policy.js";
 
 export interface ContextOptions {
   /** Route audit entries to a custom sink instead of the console. */
@@ -113,10 +114,9 @@ export async function handleRequest(
       const { body: scrubbed, matches } = scrubRequestBody(parsed, route.format, scrubber, scrubVault);
       summary = summarize(matches);
 
-      const hitsBlockCategory = matches.some((m) => cfg.blockOn.includes(m.category));
-      const shouldBlock = matches.length > 0 && (cfg.mode === "block" || hitsBlockCategory);
+      const decision = decide(matches, cfg, route.mode ?? cfg.mode);
 
-      if (shouldBlock) {
+      if (decision === "block") {
         action = "blocked";
         await audit.record({
           ts: new Date().toISOString(),
@@ -141,13 +141,13 @@ export async function handleRequest(
         return;
       }
 
-      if (cfg.mode === "warn") {
+      if (decision === "warn") {
         // Forward the original, unmodified body but record what we saw.
-        action = matches.length > 0 ? "warned" : "clean";
+        action = "warned";
         forwardBody = rawBody;
       } else {
-        // redact mode
-        action = matches.length > 0 ? "redacted" : "clean";
+        // redact (or clean — scrubbed === original when there were no matches)
+        action = decision === "redact" ? "redacted" : "clean";
         forwardBody = JSON.stringify(scrubbed);
         if (matches.length > 0) responseVault = scrubVault;
       }
