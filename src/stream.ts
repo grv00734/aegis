@@ -45,8 +45,8 @@ export class SseRestorer {
   constructor(private vault: Vault) {}
 
   feed(chunk: string): string {
-    // No redactions happened -> no placeholders can exist -> pass through.
-    if (this.vault.size === 0) return chunk;
+    // No redactions and no key -> no tokens can exist -> pass through.
+    if (!this.vault.active) return chunk;
 
     this.raw += chunk;
     let out = "";
@@ -60,7 +60,7 @@ export class SseRestorer {
   }
 
   end(): string {
-    if (this.vault.size === 0) return this.raw;
+    if (!this.vault.active) return this.raw;
     const flushed = this.flushCarry();
     const tail = this.raw;
     this.raw = "";

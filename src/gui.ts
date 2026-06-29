@@ -15,6 +15,9 @@ import { startServer } from "./server.js";
 import { startMitmProxy } from "./mitm.js";
 import type { AuditEntry } from "./audit.js";
 import { buildReport } from "./report.js";
+import { BudgetTracker } from "./budget.js";
+import { loadOrCreateKey } from "./crypto.js";
+import { optimizeText } from "./optimize.js";
 import { dashboardHtml } from "./gui-page.js";
 
 interface SystemHandle {
@@ -29,10 +32,14 @@ class GuiState {
   system: SystemHandle | null = null;
   audit: AuditEntry[] = [];
   sse = new Set<http.ServerResponse>();
+  budget?: BudgetTracker;
+  encKey?: Buffer;
 
   constructor(cfg: AegisConfig) {
     this.cfg = cfg;
     this.scrubber = new Scrubber(cfg);
+    this.budget = cfg.budget?.enabled ? new BudgetTracker(cfg.budget) : undefined;
+    this.encKey = cfg.encryption?.enabled ? loadOrCreateKey() : undefined;
   }
 
   status(): Record<string, unknown> {
@@ -47,8 +54,10 @@ class GuiState {
       dictionary: this.cfg.dictionary,
       categoryActions: this.cfg.categoryActions ?? {},
       allowlist: this.cfg.allowlist ?? [],
+      optimize: this.cfg.optimize ?? { enabled: false },
       mitmPort: this.cfg.mitm.port,
       transparentPort: this.cfg.mitm.transparentPort,
+      budget: this.budget?.snapshot() ?? null,
     };
   }
 
@@ -60,7 +69,7 @@ class GuiState {
 
   startBase(): void {
     if (this.base) return;
-    this.base = startServer(this.cfg, { auditSink: this.sink });
+    this.base = startServer(this.cfg, { auditSink: this.sink, budget: this.budget });
     this.base.on("error", () => {
       this.base = null;
       this.broadcast({ type: "status", status: this.status() });
@@ -77,7 +86,7 @@ class GuiState {
 
   startSystem(): void {
     if (this.system) return;
-    const { server, transparentServer } = startMitmProxy(this.cfg, { auditSink: this.sink });
+    const { server, transparentServer } = startMitmProxy(this.cfg, { auditSink: this.sink, budget: this.budget });
     this.system = { server, transparentServer };
     server.on("error", () => {
       this.system = null;
@@ -101,6 +110,7 @@ class GuiState {
     if (partial.dictionary) this.cfg.dictionary = partial.dictionary;
     if (partial.categoryActions !== undefined) this.cfg.categoryActions = partial.categoryActions;
     if (partial.allowlist !== undefined) this.cfg.allowlist = partial.allowlist;
+    if (partial.optimize !== undefined) this.cfg.optimize = { ...this.cfg.optimize, ...partial.optimize };
     this.scrubber = new Scrubber(this.cfg);
 
     // Re-apply to any running proxies.
@@ -115,8 +125,12 @@ class GuiState {
   }
 
   scan(text: string): Record<string, unknown> {
-    const vault = new Vault();
-    const { text: redacted, matches } = this.scrubber.scrub(text, vault);
+    const vault = new Vault(this.encKey);
+    const scrubbed = this.scrubber.scrub(text, vault);
+    const matches = scrubbed.matches;
+    // Reflect what actually goes to the AI: scrubbed, then optimized if enabled.
+    const opt = this.cfg.optimize?.enabled ? optimizeText(scrubbed.text, this.cfg.optimize) : null;
+    const redacted = opt ? opt.text : scrubbed.text;
     const findings = matches
       .slice()
       .sort((a, b) => a.start - b.start)
@@ -128,7 +142,7 @@ class GuiState {
         end: m.end,
         preview: maskPreview(m.value),
       }));
-    return { findings, redacted, summary: summarize(matches) };
+    return { findings, redacted, summary: summarize(matches), savedTokens: opt ? opt.saved : 0 };
   }
 
   broadcast(event: unknown): void {

@@ -16,7 +16,11 @@ const PAGE = `<!doctype html>
   :root{
     --green:#34c759; --blue:#0a84ff; --red:#ff453a; --amber:#ff9f0a; --purple:#bf5af2;
     --txt:#f5f5f7; --sub:rgba(235,235,245,.6); --glass:rgba(40,40,52,.55);
-    --glass2:rgba(70,70,84,.45); --stroke:rgba(255,255,255,.16);
+    --glass2:rgba(70,70,84,.45); --stroke:rgba(255,255,255,.14);
+    /* glass edge: hairline border + top highlight + soft depth */
+    --edge:inset 0 1px 0 rgba(255,255,255,.18), inset 0 0 0 1px rgba(255,255,255,.05);
+    --depth:0 12px 38px rgba(0,0,0,.36);
+    --ring:0 0 0 3px rgba(10,132,255,.28);
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{height:100%}
@@ -39,16 +43,17 @@ const PAGE = `<!doctype html>
     border-radius:999px;padding:4px 9px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
-  .stat{background:var(--glass);border:1px solid var(--stroke);border-radius:18px;padding:14px 16px;
-    backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px)}
+  .stat{background:var(--glass);border:1px solid var(--stroke);border-radius:16px;padding:14px 16px;
+    backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);box-shadow:var(--edge)}
   .stat .n{font-size:30px;font-weight:800;line-height:1}
   .stat .l{font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.5px;margin-top:6px}
   .stat.b .n{color:var(--blue)} .stat.r .n{color:var(--red)} .stat.g .n{color:var(--green)}
 
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  .module{background:var(--glass);border:1px solid var(--stroke);border-radius:24px;padding:16px;
+  .module{background:var(--glass);border:1px solid var(--stroke);border-radius:22px;padding:16px;
     backdrop-filter:blur(26px) saturate(150%);-webkit-backdrop-filter:blur(26px) saturate(150%);
-    box-shadow:0 10px 34px rgba(0,0,0,.32);animation:rise .4s ease both}
+    box-shadow:var(--depth), var(--edge);animation:rise .4s ease both;transition:border-color .2s}
+  .module:hover{border-color:rgba(255,255,255,.22)}
   @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
   .module h2{margin:0 0 12px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.7px;color:var(--sub);
     display:flex;justify-content:space-between;align-items:center}
@@ -65,7 +70,8 @@ const PAGE = `<!doctype html>
   .conn .txt b{font-weight:600;font-size:15px}
   .conn .txt small{display:block;color:var(--sub);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-  .segmented{display:flex;background:rgba(0,0,0,.28);border-radius:12px;padding:3px;gap:3px}
+  .segmented{display:flex;background:rgba(0,0,0,.28);border-radius:12px;padding:3px;gap:3px;box-shadow:inset 0 1px 2px rgba(0,0,0,.3)}
+  .segmented button.on{box-shadow:var(--edge)}
   .segmented button{flex:1;border:0;background:transparent;color:var(--txt);font-size:13px;font-weight:600;padding:8px 4px;border-radius:9px;cursor:pointer;transition:.15s}
   .segmented button.on{background:rgba(255,255,255,.22)}
 
@@ -79,7 +85,8 @@ const PAGE = `<!doctype html>
   .switch input:checked + .sl:before{transform:translateX(20px)}
 
   textarea{width:100%;background:rgba(0,0,0,.28);color:var(--txt);border:1px solid var(--stroke);border-radius:14px;
-    padding:11px 13px;font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;resize:vertical}
+    padding:11px 13px;font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;resize:vertical;transition:border-color .15s, box-shadow .15s}
+  textarea:focus,select:focus{outline:none;border-color:var(--blue);box-shadow:var(--ring)}
   .btn{background:var(--blue);color:#fff;border:0;border-radius:12px;padding:9px 16px;font-size:14px;font-weight:600;cursor:pointer}
   .btn.sub{background:rgba(255,255,255,.16)}
   .btn.tiny{padding:5px 11px;font-size:12px;border-radius:9px}
@@ -87,7 +94,7 @@ const PAGE = `<!doctype html>
   .samples{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
 
   .panes{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
-  .pane{background:rgba(0,0,0,.3);border:1px solid var(--stroke);border-radius:14px;padding:12px;
+  .pane{background:rgba(0,0,0,.3);border:1px solid var(--stroke);border-radius:14px;padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.06);
     white-space:pre-wrap;word-break:break-word;font-size:12.5px;max-height:210px;overflow:auto;
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   .pane .ttl{font-family:inherit;color:var(--sub);font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;display:block}
@@ -120,7 +127,7 @@ const PAGE = `<!doctype html>
   .saved{color:var(--green);font-size:12px;margin-left:10px}
   .polgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
   .polrow{display:flex;align-items:center;justify-content:space-between;background:rgba(0,0,0,.22);
-    border:1px solid var(--stroke);border-radius:12px;padding:8px 12px;font-size:13px}
+    border:1px solid var(--stroke);border-radius:12px;padding:8px 12px;font-size:13px;box-shadow:var(--edge)}
   .polrow select{background:rgba(0,0,0,.32);color:var(--txt);border:1px solid var(--stroke);
     border-radius:8px;padding:5px 8px;font-size:12px}
   #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:rgba(20,20,28,.92);
@@ -166,7 +173,8 @@ const PAGE = `<!doctype html>
         <button data-mode="block">Block</button>
         <button data-mode="warn">Warn</button>
       </div>
-      <p class="hint" style="margin-top:12px;margin-bottom:0">Redact swaps secrets for placeholders and restores them in the reply. Block refuses the request.</p>
+      <p class="hint" style="margin-top:12px;margin-bottom:6px">Redact swaps secrets for placeholders and restores them in the reply. Block refuses the request.</p>
+      <label class="srow"><span>Optimize prompts (reduce tokens)</span><span class="switch"><input type="checkbox" id="optToggle"/><span class="sl"></span></span></label>
     </section>
 
     <section class="module span2">
@@ -184,6 +192,7 @@ const PAGE = `<!doctype html>
       </div>
       <div class="chips" id="chips">
         <span class="chip"><b id="count">0</b> findings</span>
+        <span class="chip" id="savedChip" style="display:none"></span>
         <button class="btn sub tiny" id="copyBtn" style="margin-left:auto" disabled>Copy scrubbed</button>
       </div>
     </section>
@@ -210,6 +219,11 @@ const PAGE = `<!doctype html>
       <div style="display:flex;align-items:center;margin-top:10px">
         <button class="btn sub" id="btnAllow">Apply allowlist</button><span class="saved" id="savedAllow"></span>
       </div>
+    </section>
+
+    <section class="module span2">
+      <h2>Token spend</h2>
+      <div id="budget"><div class="empty">Budget control is off (set budget.enabled in config).</div></div>
     </section>
 
     <section class="module span2">
@@ -254,7 +268,28 @@ const PAGE = `<!doctype html>
     Array.prototype.forEach.call($("segMode").children,function(b){b.classList.toggle("on",b.dataset.mode===s.mode)});
     renderDetectors(s.detectors);
     renderPolicy(s);
+    if(document.activeElement!==$("optToggle")) $("optToggle").checked=!!(s.optimize&&s.optimize.enabled);
+    renderBudget(s);
     if(document.activeElement!==$("dictionary")) $("dictionary").value=(s.dictionary||[]).join("\\n");
+  }
+  function pbar(label,pct){return '<div class="bar"><span>'+esc(label)+'</span><span class="track"><span class="fill" style="width:'+pct+'%"></span></span><span class="v">'+pct+'%</span></div>'}
+  function renderBudget(s){
+    var b=s.budget;
+    if(!b){$("budget").innerHTML='<div class="empty">Budget control is off (set budget.enabled in config).</div>';return}
+    var lim=b.limits||{}; var h='';
+    h+='<div class="hint" style="margin:0 0 8px">window '+b.windowHours+'h · action '+esc(b.action)+' · resets '+esc((b.resetAt||"").replace("T"," ").replace(/\\..*/,""))+'</div>';
+    h+='<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">';
+    h+='<div class="stat b" style="flex:1"><div class="n">'+b.total.tokens+'</div><div class="l">tokens'+(lim.maxTokens?" / "+lim.maxTokens:"")+'</div></div>';
+    h+='<div class="stat g" style="flex:1"><div class="n">$'+b.total.costUsd.toFixed(4)+'</div><div class="l">cost'+(lim.maxCostUsd?" / $"+lim.maxCostUsd:"")+'</div></div>';
+    h+='<div class="stat" style="flex:1"><div class="n">'+b.total.requests+'</div><div class="l">requests</div></div>';
+    h+='</div>';
+    if(lim.maxTokens) h+=pbar("tokens",Math.min(100,Math.round(b.total.tokens/lim.maxTokens*100)));
+    if(lim.maxCostUsd) h+=pbar("cost",Math.min(100,Math.round(b.total.costUsd/lim.maxCostUsd*100)));
+    if(b.services&&b.services.length){h+='<div class="hint" style="margin-top:10px">by service</div>';
+      b.services.forEach(function(x){h+='<div class="bar"><span>'+esc(x.service)+'</span><span class="track"></span><span class="v">'+x.tokens+' tok · $'+x.costUsd.toFixed(4)+'</span></div>'})}
+    if(b.users&&b.users.length){h+='<div class="hint" style="margin-top:10px">by employee</div>';
+      b.users.forEach(function(x){h+='<div class="bar"><span>'+esc(x.user)+'</span><span class="track"></span><span class="v">'+x.tokens+' tok · $'+x.costUsd.toFixed(4)+' · '+x.requests+' req</span></div>'})}
+    $("budget").innerHTML=h;
   }
   function renderPolicy(s){
     if(!$("catActions").dataset.built){
@@ -285,6 +320,7 @@ const PAGE = `<!doctype html>
   }
   function saveDetectors(){var det={};DETECTORS.forEach(function(k){det[k]=$("det_"+k).checked});setConfig({detectors:det}).then(function(){scan();toast("Detectors updated")})}
 
+  $("optToggle").addEventListener("change",function(){setConfig({optimize:{enabled:$("optToggle").checked}}).then(function(){toast("Optimize prompts "+($("optToggle").checked?"on":"off"))})});
   $("toggleBase").addEventListener("click",function(){api(current.base?"/api/proxy/stop":"/api/proxy/start","POST",{kind:"base"}).then(function(s){renderStatus(s);toast(s.base?"Base-URL guard on":"Base-URL guard off")})});
   $("toggleSystem").addEventListener("click",function(){api(current.system?"/api/proxy/stop":"/api/proxy/start","POST",{kind:"system"}).then(function(s){renderStatus(s);toast(s.system?"System guard on":"System guard off")})});
   Array.prototype.forEach.call($("segMode").children,function(b){b.addEventListener("click",function(){setConfig({mode:b.dataset.mode}).then(function(){scan();toast("Mode: "+b.dataset.mode)})})});
@@ -323,6 +359,7 @@ const PAGE = `<!doctype html>
       $("detected").innerHTML='<span class="ttl">Detected (highlighted)</span>'+highlight(text,r.findings);
       $("redacted").innerHTML='<span class="ttl">Sent to the AI (scrubbed)</span>'+colorPlaceholders(r.redacted);
       $("count").textContent=r.findings.length;
+      if(r.savedTokens){$("savedChip").textContent="saved "+r.savedTokens+" tok";$("savedChip").style.display=""}else{$("savedChip").style.display="none"}
       $("copyBtn").disabled=r.findings.length===0;
     });
   }
@@ -348,6 +385,7 @@ const PAGE = `<!doctype html>
   function addActivity(e){
     var ul=$("activity");var em=ul.querySelector(".empty");if(em)em.remove();
     var types=Object.keys((e.summary&&e.summary.byType)||{}).map(function(k){return k+"×"+e.summary.byType[k]}).join(", ");
+    if(e.savedTokens)types=(types?types+" · ":"")+"opt -"+e.savedTokens+" tok";
     var tag=e.action==="blocked"?"BLOCK":e.action==="redacted"?"REDACT":e.action==="warned"?"WARN":"CLEAN";
     var li=document.createElement("li");
     li.innerHTML='<span class="tag '+tag+'">'+tag+'</span>'+

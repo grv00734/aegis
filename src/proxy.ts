@@ -6,10 +6,15 @@ import { scrubRequestBody } from "./messages.js";
 import { SseRestorer } from "./stream.js";
 import { AuditLog, type Action, type AuditEntry } from "./audit.js";
 import { decide } from "./policy.js";
+import { BudgetTracker, estimateTokens, extractUsage, costOf, identifyUser } from "./budget.js";
+import { loadOrCreateKey } from "./crypto.js";
+import { optimizeText } from "./optimize.js";
 
 export interface ContextOptions {
   /** Route audit entries to a custom sink instead of the console. */
   auditSink?: (entry: AuditEntry) => void;
+  /** Share a budget tracker (e.g. across the GUI's proxies). */
+  budget?: BudgetTracker;
 }
 
 /** Headers we must not forward verbatim (hop-by-hop or recomputed). */
@@ -36,10 +41,18 @@ export interface ProxyContext {
   cfg: AegisConfig;
   scrubber: Scrubber;
   audit: AuditLog;
+  budget?: BudgetTracker;
+  encKey?: Buffer;
 }
 
 export function createContext(cfg: AegisConfig, opts: ContextOptions = {}): ProxyContext {
-  return { cfg, scrubber: new Scrubber(cfg), audit: new AuditLog(cfg.auditLog, opts.auditSink) };
+  return {
+    cfg,
+    scrubber: new Scrubber(cfg),
+    audit: new AuditLog(cfg.auditLog, opts.auditSink),
+    budget: opts.budget ?? (cfg.budget?.enabled ? new BudgetTracker(cfg.budget) : undefined),
+    encKey: cfg.encryption?.enabled ? loadOrCreateKey() : undefined,
+  };
 }
 
 function matchRoute(cfg: AegisConfig, pathname: string): RouteConfig | null {
@@ -54,6 +67,15 @@ function matchRoute(cfg: AegisConfig, pathname: string): RouteConfig | null {
     return { matchPrefix: "/", upstream: cfg.defaultUpstream, format: "passthrough" };
   }
   return null;
+}
+
+/** Stable per-service key for budgeting: the upstream host. */
+function serviceOf(upstream: string): string {
+  try {
+    return new URL(upstream).host;
+  } catch {
+    return upstream;
+  }
 }
 
 function readBody(req: IncomingMessage): Promise<Buffer> {
@@ -84,7 +106,15 @@ export async function handleRequest(
 
   if (url.pathname === "/__aegis/health") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ status: "ok", service: "aegis", kind: "base-url-proxy", mode: cfg.mode }));
+    res.end(
+      JSON.stringify({
+        status: "ok",
+        service: "aegis",
+        kind: "base-url-proxy",
+        mode: cfg.mode,
+        budget: ctx.budget?.snapshot() ?? null,
+      }),
+    );
     return;
   }
 
@@ -103,15 +133,30 @@ export async function handleRequest(
   const isJson = contentType.includes("application/json") || contentType.includes("+json");
 
   let forwardBody: Buffer | string | undefined = rawBody.length ? rawBody : undefined;
-  let responseVault = new Vault(); // stays empty unless we redact
+  let responseVault = new Vault(ctx.encKey); // carries the key so responses can be decrypted
   let action: Action = "clean";
   let summary = summarize([]);
+  let model: string | undefined;
+  let savedTokens = 0;
+  const service = serviceOf(route.upstream);
+  const user =
+    ctx.budget && cfg.budget?.enabled
+      ? identifyUser(req.headers as Record<string, unknown>, cfg.budget)
+      : undefined;
+  const optimizeFn = cfg.optimize?.enabled
+    ? (s: string): string => {
+        const r = optimizeText(s, cfg.optimize!);
+        savedTokens += r.saved;
+        return r.text;
+      }
+    : undefined;
 
   if (rawBody.length && isJson) {
     try {
       const parsed = JSON.parse(rawBody.toString("utf8"));
-      const scrubVault = new Vault();
-      const { body: scrubbed, matches } = scrubRequestBody(parsed, route.format, scrubber, scrubVault);
+      if (typeof parsed?.model === "string") model = parsed.model;
+      const scrubVault = new Vault(ctx.encKey);
+      const { body: scrubbed, matches } = scrubRequestBody(parsed, route.format, scrubber, scrubVault, optimizeFn);
       summary = summarize(matches);
 
       const decision = decide(matches, cfg, route.mode ?? cfg.mode);
@@ -157,6 +202,24 @@ export async function handleRequest(
     }
   }
 
+  // --- Token / cost budget check (pre-flight) ---
+  if (ctx.budget && cfg.budget?.enabled) {
+    const estIn = estimateTokens(rawBody.toString("utf8"));
+    const estCost = costOf(model, { inputTokens: estIn, outputTokens: 0 }, cfg.budget);
+    const verdict = ctx.budget.check(service, estIn, estCost, user);
+    if (!verdict.ok) {
+      const note = `budget: ${verdict.reason}`;
+      if (cfg.budget.action === "warn") {
+        void audit.record({ ts: new Date().toISOString(), route: url.pathname, format: route.format, mode: cfg.mode, action: "warned", note, summary: summarize([]) });
+      } else {
+        await audit.record({ ts: new Date().toISOString(), route: url.pathname, format: route.format, mode: cfg.mode, action: "blocked", note, summary: summarize([]) });
+        res.writeHead(429, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { type: "aegis_budget_exceeded", message: verdict.reason } }));
+        return;
+      }
+    }
+  }
+
   // --- Forward upstream ---
   const upstreamUrl = route.upstream.replace(/\/$/, "") + url.pathname + url.search;
   let upstream: Response;
@@ -175,7 +238,7 @@ export async function handleRequest(
   }
 
   // Audit after we know the request was accepted for forwarding.
-  if (summary.total > 0 || action !== "clean") {
+  if (summary.total > 0 || action !== "clean" || savedTokens > 0) {
     await audit.record({
       ts: new Date().toISOString(),
       route: url.pathname,
@@ -183,29 +246,43 @@ export async function handleRequest(
       mode: cfg.mode,
       action,
       summary,
+      savedTokens: savedTokens > 0 ? savedTokens : undefined,
     });
   }
 
   // Build a response scanner that flags NEW secrets in the AI output. It scans
   // the model's raw text (before placeholder restore) so the employee's own
   // restored values don't re-trigger.
-  const responseScanner = cfg.scanResponses
-    ? (rawText: string): void => {
-        const matches = scrubber.detect(rawText);
-        if (matches.length === 0) return;
-        void audit.record({
-          ts: new Date().toISOString(),
-          route: url.pathname,
-          format: route.format,
-          mode: cfg.mode,
-          action: "warned",
-          direction: "response",
-          summary: summarize(matches),
-        });
-      }
-    : undefined;
+  const wantBudget = !!(ctx.budget && cfg.budget?.enabled);
+  const onResponse =
+    cfg.scanResponses || wantBudget
+      ? (rawText: string): void => {
+          if (cfg.scanResponses) {
+            const matches = scrubber.detect(rawText);
+            if (matches.length > 0) {
+              void audit.record({
+                ts: new Date().toISOString(),
+                route: url.pathname,
+                format: route.format,
+                mode: cfg.mode,
+                action: "warned",
+                direction: "response",
+                summary: summarize(matches),
+              });
+            }
+          }
+          if (wantBudget && ctx.budget) {
+            const usage =
+              extractUsage(rawText) ?? {
+                inputTokens: estimateTokens(rawBody.toString("utf8")),
+                outputTokens: estimateTokens(rawText),
+              };
+            ctx.budget.record(service, usage, model, user);
+          }
+        }
+      : undefined;
 
-  await sendResponse(res, upstream, responseVault, responseScanner);
+  await sendResponse(res, upstream, responseVault, onResponse);
 }
 
 async function sendResponse(
@@ -240,7 +317,7 @@ async function sendResponse(
     respHeaders["content-type"] = "text/event-stream";
     respHeaders["cache-control"] = "no-cache";
     res.writeHead(status, respHeaders);
-    const restorer = vault.size > 0 ? new SseRestorer(vault) : null;
+    const restorer = vault.active ? new SseRestorer(vault) : null;
     let raw = "";
     for await (const chunk of upstream.body as AsyncIterable<Uint8Array>) {
       const txt = decoder.decode(chunk, { stream: true });
@@ -263,7 +340,7 @@ async function sendResponse(
   // JSON / text: buffer, (optionally) restore, scan the raw text, send.
   const text = await upstream.text();
   let out = text;
-  if (vault.size > 0) {
+  if (vault.active) {
     try {
       out = JSON.stringify(vault.restoreDeep(JSON.parse(text)));
     } catch {

@@ -11,10 +11,12 @@ import { startMitmProxy } from "./mitm.js";
 import { CertAuthority, trustInstructions } from "./ca.js";
 import { plan as transparentPlan, apply as transparentApply, isRoot } from "./transparent.js";
 import { probeHealth, probeTcp } from "./status.js";
+import type { BudgetTracker } from "./budget.js";
 import { startGui } from "./gui.js";
 import { launchApp } from "./app.js";
 import { scanHistory } from "./history.js";
 import { buildReport, formatReportText, parseAuditFile } from "./report.js";
+import { optimizeText } from "./optimize.js";
 import { spawn } from "node:child_process";
 
 function parseFlags(args: string[]): { positionals: string[]; flags: Record<string, string> } {
@@ -69,6 +71,51 @@ function openBrowser(url: string): void {
     child.unref();
   } catch {
     /* best effort */
+  }
+}
+
+async function cmdBudget(flags: Record<string, string>): Promise<void> {
+  const cfg = loadConfig(flags.config);
+  if (!cfg.budget?.enabled) {
+    console.log('Token budget is disabled. Set "budget": { "enabled": true, ... } in aegis.config.json.');
+    return;
+  }
+
+  const [base, sys] = await Promise.all([
+    probeHealth(cfg.host, cfg.port),
+    probeHealth(cfg.host, cfg.mitm.port),
+  ]);
+  const snap =
+    ((base.info as { budget?: unknown } | undefined)?.budget as ReturnType<BudgetTracker["snapshot"]> | undefined) ??
+    ((sys.info as { budget?: unknown } | undefined)?.budget as ReturnType<BudgetTracker["snapshot"]> | undefined) ??
+    null;
+
+  if (!snap) {
+    console.log("Budget is configured, but no running guard was found to read live spend from.");
+    console.log(`  window ${cfg.budget.windowHours}h   action=${cfg.budget.action}`);
+    console.log(
+      `  limits: tokens=${cfg.budget.maxTokens ?? "-"}  cost=$${cfg.budget.maxCostUsd ?? "-"}  perRequest=${cfg.budget.maxRequestTokens ?? "-"}`,
+    );
+    console.log("  Start `aegis start` or `aegis proxy` to begin tracking.");
+    return;
+  }
+
+  console.log(`\nToken spend  (window ${snap.windowHours}h, resets ${snap.resetAt})   action=${snap.action}`);
+  console.log(`  total: ${snap.total.tokens} tokens   $${snap.total.costUsd.toFixed(4)}   ${snap.total.requests} request(s)`);
+  console.log(
+    `  limits: tokens=${snap.limits.maxTokens ?? "-"}  cost=$${snap.limits.maxCostUsd ?? "-"}  perRequest=${snap.limits.maxRequestTokens ?? "-"}`,
+  );
+  if (snap.services.length) {
+    console.log("  by service:");
+    for (const s of snap.services) {
+      console.log(`    ${s.service.padEnd(28)} ${String(s.tokens).padStart(8)} tok   $${s.costUsd.toFixed(4)}   ${s.requests} req`);
+    }
+  }
+  if (snap.users.length) {
+    console.log("  by employee:");
+    for (const u of snap.users) {
+      console.log(`    ${u.user.padEnd(28)} ${String(u.tokens).padStart(8)} tok   $${u.costUsd.toFixed(4)}   ${u.requests} req`);
+    }
   }
 }
 
@@ -242,6 +289,22 @@ function cmdSetup(flags: Record<string, string>): void {
   console.log(`Undo any time with: aegis setup --undo`);
 }
 
+function cmdOptimize(positionals: string[], flags: Record<string, string>): void {
+  const cfg = loadConfig(flags.config);
+  const file = positionals[0];
+  const text = file ? readFileSync(resolve(process.cwd(), file), "utf8") : readFileSync(0, "utf8");
+  const r = optimizeText(text, {
+    enabled: true,
+    aggressive: flags.aggressive === "true" || cfg.optimize?.aggressive,
+    maxPasses: cfg.optimize?.maxPasses,
+  });
+  const pct = r.beforeTokens > 0 ? Math.round((r.saved / r.beforeTokens) * 100) : 0;
+  console.log(
+    `Before: ${r.beforeTokens} tokens   After: ${r.afterTokens} tokens   Saved: ${r.saved} (${pct}%)   passes: ${r.passes}`,
+  );
+  if (flags.print === "true") process.stdout.write("\n" + r.text + "\n");
+}
+
 function cmdScanHistory(flags: Record<string, string>): void {
   const cfg = loadConfig(flags.config);
   const scrubber = new Scrubber(cfg);
@@ -329,6 +392,9 @@ function main(): void {
     case "scan-history":
       cmdScanHistory(flags);
       break;
+    case "optimize":
+      cmdOptimize(positionals, flags);
+      break;
     case "report":
       cmdReport(flags);
       break;
@@ -340,6 +406,9 @@ function main(): void {
       break;
     case "status":
       void cmdStatus(flags);
+      break;
+    case "budget":
+      void cmdBudget(flags);
       break;
     case "gui":
       cmdGui(flags);
@@ -387,11 +456,14 @@ Usage:
   aegis gui    [--config <path>] [--port <n>] [--open]
       Launch the local web control panel (default http://127.0.0.1:8799).
 
+  aegis budget [--config <path>]              Show token / cost spend against the budget
   aegis status [--config <path>]              Check whether the guard is running
   aegis scan        [file] [--config <path>]  Scan a file (or stdin) for findings
   aegis scan-history [--path <dir>]           Scan the entire git history for secrets
   aegis report      [--since <iso>] [--format text|json] [--input <log>]
       Compliance report (PCI/HIPAA/GDPR) from the audit log.
+  aegis optimize    [file] [--aggressive] [--print]
+      Preview prompt-compression token savings on a file (or stdin).
   aegis init                                  Write a starter aegis.config.json
 
 Examples:

@@ -1,45 +1,77 @@
 /**
  * The Vault holds the mapping between real confidential values and the opaque
- * placeholders that take their place in outbound traffic.
+ * tokens that take their place in outbound traffic.
+ *
+ * Two token strategies:
+ *  - default: a stable index placeholder `[[REDACTED:TYPE:N]]` (mapping kept in
+ *    memory for this request).
+ *  - encryption mode (constructed with a key): an AES-256-GCM token
+ *    `[[AEGIS:<ciphertext>]]`. The ciphertext carries the value, so restoration
+ *    works by decryption — statelessly, even across restarts/instances.
  *
  * SECURITY: a Vault is created fresh per request and lives only in memory for
  * the duration of that request/response pair. Real values are never written to
- * disk, never logged, and never sent upstream.
+ * disk, never logged, and never sent upstream (only placeholders/ciphertext are).
  */
+import { encrypt, decrypt, AEGIS_TOKEN_RE } from "../crypto.js";
 
 const PLACEHOLDER_RE = /\[\[REDACTED:[A-Z0-9_]+:\d+\]\]/g;
+/** Matches either token kind, for the fast map-based restore pass. */
+const ANY_TOKEN_RE = /\[\[(?:REDACTED:[A-Z0-9_]+:\d+|AEGIS:[A-Za-z0-9_-]+)\]\]/g;
 
 export class Vault {
   private counter = 0;
-  /** real value -> placeholder (so repeated values map to the same token). */
+  /** real value -> token (so repeated values map to the same token). */
   private forward = new Map<string, string>();
-  /** placeholder -> real value (for restoration). */
+  /** token -> real value (for restoration). */
   private backward = new Map<string, string>();
+  private key?: Buffer;
 
-  /** Return a stable placeholder for a given real value + type. */
+  /** Pass a key to enable encryption mode; omit for index placeholders. */
+  constructor(key?: Buffer) {
+    this.key = key;
+  }
+
+  /** Return a stable token for a given real value + type. */
   placeholderFor(value: string, type: string): string {
     const existing = this.forward.get(value);
     if (existing) return existing;
 
-    const token = `[[REDACTED:${type}:${++this.counter}]]`;
+    const token = this.key
+      ? `[[AEGIS:${encrypt(value, this.key)}]]`
+      : `[[REDACTED:${type}:${++this.counter}]]`;
     this.forward.set(value, token);
     this.backward.set(token, value);
     return token;
   }
 
-  /** Swap any placeholders found in `text` back to their real values. */
+  /** Swap any tokens found in `text` back to their real values. */
   restore(text: string): string {
-    if (this.backward.size === 0) return text;
-    return text.replace(PLACEHOLDER_RE, (token) => this.backward.get(token) ?? token);
+    if (this.backward.size === 0 && !this.key) return text;
+    let out = text;
+    // 1) fast path: exact tokens we minted this request.
+    if (this.backward.size > 0) {
+      out = out.replace(ANY_TOKEN_RE, (t) => this.backward.get(t) ?? t);
+    }
+    // 2) stateless path: decrypt any remaining encrypted tokens.
+    if (this.key) {
+      out = out.replace(AEGIS_TOKEN_RE, (m, blob: string) => decrypt(blob, this.key!) ?? m);
+    }
+    return out;
   }
 
   get size(): number {
     return this.backward.size;
   }
 
-  /** Recursively restore placeholders in every string within a JSON-like value. */
+  /** Whether this vault should process responses (has entries or a key). */
+  get active(): boolean {
+    return this.backward.size > 0 || !!this.key;
+  }
+
+  /** Recursively restore tokens in every string within a JSON-like value. */
   restoreDeep<T>(value: T): T {
-    if (this.backward.size === 0) return value;
+    if (this.backward.size === 0 && !this.key) return value;
     if (typeof value === "string") return this.restore(value) as unknown as T;
     if (Array.isArray(value)) return value.map((v) => this.restoreDeep(v)) as unknown as T;
     if (value && typeof value === "object") {

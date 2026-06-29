@@ -29,7 +29,15 @@ export interface Detector {
 
 export type Mode = "redact" | "block" | "warn";
 
-export type RouteFormat = "anthropic" | "openai" | "passthrough";
+export type RouteFormat = "anthropic" | "openai" | "gemini" | "passthrough";
+
+export interface OptimizeConfig {
+  enabled: boolean;
+  /** Also remove blank lines and collapse internal whitespace (bigger savings). */
+  aggressive?: boolean;
+  /** Max convergence iterations (default 4). */
+  maxPasses?: number;
+}
 
 export interface RouteConfig {
   matchPrefix: string;
@@ -67,6 +75,13 @@ export interface AegisConfig {
   /** Shared policy file (a partial config) merged over local settings, so a
    * security team can centrally govern dictionary/mode/detectors across machines. */
   policyFile?: string;
+  /** Token / cost spend control across AI services. */
+  budget?: BudgetConfig;
+  /** Encrypt confidential values (AES-256-GCM, local key) instead of using index
+   * placeholders. The ciphertext is sent to the AI and decrypted on the response. */
+  encryption?: { enabled: boolean };
+  /** Local prompt compression to cut tokens before requests leave (no AI calls). */
+  optimize?: OptimizeConfig;
   dictionary: string[];
   code: {
     markers: string[];
@@ -84,6 +99,34 @@ export interface AegisConfig {
     /** Hostnames to decrypt + scrub. Everything else is blind-tunnelled untouched. */
     hosts: string[];
   };
+}
+
+/** Token / cost spend control. Limits apply over a rolling window. */
+export interface BudgetConfig {
+  enabled: boolean;
+  /** Rolling window length in hours (default 24). */
+  windowHours: number;
+  /** What to do when a limit would be exceeded. */
+  action: "block" | "warn";
+  /** Total tokens allowed per window across all services. */
+  maxTokens?: number;
+  /** Total cost (USD) allowed per window across all services. */
+  maxCostUsd?: number;
+  /** Hard cap on a single request's estimated tokens. */
+  maxRequestTokens?: number;
+  /** Per-service overrides, keyed by upstream host (e.g. "api.openai.com"). */
+  perService?: Record<string, { maxTokens?: number; maxCostUsd?: number }>;
+  /** Override price table: model-name substring -> USD per 1M input/output tokens. */
+  pricing?: Record<string, { input: number; output: number }>;
+  /** Request header that identifies the employee (e.g. "x-aegis-user"). If
+   * absent on a request, Aegis falls back to an API-key fingerprint, then the
+   * OS user. */
+  identifyHeader?: string;
+  /** Default per-employee caps (applied to every user without a perUser entry). */
+  maxUserTokens?: number;
+  maxUserCostUsd?: number;
+  /** Per-employee overrides, keyed by the resolved user id. */
+  perUser?: Record<string, { maxTokens?: number; maxCostUsd?: number }>;
 }
 
 /** Summary of what was found in a single request — counts only, never values. */

@@ -24,6 +24,9 @@ import { AuditLog, type Action, type AuditEntry } from "./audit.js";
 import { CertAuthority, aegisHome } from "./ca.js";
 import { peekSni } from "./sni.js";
 import { decide } from "./policy.js";
+import { BudgetTracker, estimateTokens, extractUsage, costOf, identifyUser } from "./budget.js";
+import { loadOrCreateKey } from "./crypto.js";
+import { optimizeText } from "./optimize.js";
 
 export interface Upstream {
   host: string;
@@ -37,6 +40,8 @@ export interface Upstream {
 export interface MitmOptions {
   caDir?: string;
   auditSink?: (entry: AuditEntry) => void;
+  /** Share a budget tracker (e.g. across the GUI's proxies). */
+  budget?: BudgetTracker;
   /** Test seam: redirect a host to a different upstream / trust settings. */
   resolveUpstream?: (host: string, secure: boolean) => Upstream;
   /** Also listen for OS-redirected (iptables) connections on this port. */
@@ -73,6 +78,8 @@ export function startMitmProxy(cfg: AegisConfig, opts: MitmOptions = {}): MitmHa
   const ca = new CertAuthority(opts.caDir ?? aegisHome());
   const scrubber = new Scrubber(cfg);
   const audit = new AuditLog(undefined, opts.auditSink);
+  const budget = opts.budget ?? (cfg.budget?.enabled ? new BudgetTracker(cfg.budget) : undefined);
+  const encKey = cfg.encryption?.enabled ? loadOrCreateKey(opts.caDir ?? aegisHome()) : undefined;
   const allow = new Set(cfg.mitm.hosts.map((h) => h.toLowerCase()));
   const resolveUpstream =
     opts.resolveUpstream ??
@@ -175,7 +182,7 @@ export function startMitmProxy(cfg: AegisConfig, opts: MitmOptions = {}): MitmHa
   async function handlePlain(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     if ((req.url ?? "").startsWith("/__aegis/health")) {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ status: "ok", service: "aegis", kind: "system-proxy", mode: cfg.mode }));
+      res.end(JSON.stringify({ status: "ok", service: "aegis", kind: "system-proxy", mode: cfg.mode, budget: budget?.snapshot() ?? null }));
       return;
     }
     try {
@@ -212,15 +219,25 @@ export function startMitmProxy(cfg: AegisConfig, opts: MitmOptions = {}): MitmHa
     const isJson = String(req.headers["content-type"] ?? "").includes("json");
 
     let forwardBody: Buffer | string = rawBody;
-    let responseVault = new Vault();
+    let responseVault = new Vault(encKey);
     let action: Action = "clean";
     let summary = summarize([]);
+    let model: string | undefined;
+    let savedTokens = 0;
+    const optimizeFn = cfg.optimize?.enabled
+      ? (s: string): string => {
+          const r = optimizeText(s, cfg.optimize!);
+          savedTokens += r.saved;
+          return r.text;
+        }
+      : undefined;
 
     if (rawBody.length && isJson) {
       try {
         const parsed = JSON.parse(rawBody.toString("utf8"));
-        const vault = new Vault();
-        const { body: scrubbed, matches } = scrubRequestBody(parsed, format, scrubber, vault);
+        if (typeof parsed?.model === "string") model = parsed.model;
+        const vault = new Vault(encKey);
+        const { body: scrubbed, matches } = scrubRequestBody(parsed, format, scrubber, vault, optimizeFn);
         summary = summarize(matches);
         const decision = decide(matches, cfg, cfg.mode);
 
@@ -252,17 +269,48 @@ export function startMitmProxy(cfg: AegisConfig, opts: MitmOptions = {}): MitmHa
       }
     }
 
-    if (summary.total > 0 || action !== "clean") {
-      await audit.record({ ts: new Date().toISOString(), route: `${host}${path}`, format, mode: cfg.mode, action, summary });
+    if (summary.total > 0 || action !== "clean" || savedTokens > 0) {
+      await audit.record({ ts: new Date().toISOString(), route: `${host}${path}`, format, mode: cfg.mode, action, summary, savedTokens: savedTokens > 0 ? savedTokens : undefined });
     }
 
-    forwardUpstream(req, res, { host, path, secure, body: forwardBody, vault: responseVault });
+    // --- Token / cost budget check (pre-flight) ---
+    const user = budget && cfg.budget?.enabled ? identifyUser(req.headers as Record<string, unknown>, cfg.budget) : undefined;
+    if (budget && cfg.budget?.enabled) {
+      const estIn = estimateTokens(rawBody.toString("utf8"));
+      const estCost = costOf(model, { inputTokens: estIn, outputTokens: 0 }, cfg.budget);
+      const verdict = budget.check(host, estIn, estCost, user);
+      if (!verdict.ok) {
+        const note = `budget: ${verdict.reason}`;
+        if (cfg.budget.action === "warn") {
+          void audit.record({ ts: new Date().toISOString(), route: `${host}${path}`, format, mode: cfg.mode, action: "warned", note, summary: summarize([]) });
+        } else {
+          await audit.record({ ts: new Date().toISOString(), route: `${host}${path}`, format, mode: cfg.mode, action: "blocked", note, summary: summarize([]) });
+          res.writeHead(429, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: { type: "aegis_budget_exceeded", message: verdict.reason } }));
+          return;
+        }
+      }
+    }
+
+    const onRaw =
+      budget && cfg.budget?.enabled
+        ? (rawText: string): void => {
+            const usage =
+              extractUsage(rawText) ?? {
+                inputTokens: estimateTokens(rawBody.toString("utf8")),
+                outputTokens: estimateTokens(rawText),
+              };
+            budget.record(host, usage, model, user);
+          }
+        : undefined;
+
+    forwardUpstream(req, res, { host, path, secure, body: forwardBody, vault: responseVault, onRaw });
   }
 
   function forwardUpstream(
     req: http.IncomingMessage,
     res: http.ServerResponse,
-    o: { host: string; path: string; secure: boolean; body: Buffer | string; vault: Vault },
+    o: { host: string; path: string; secure: boolean; body: Buffer | string; vault: Vault; onRaw?: (raw: string) => void },
   ): void {
     const up = resolveUpstream(o.host, o.secure);
     const headers = filterHeaders(req.headers);
@@ -282,7 +330,7 @@ export function startMitmProxy(cfg: AegisConfig, opts: MitmOptions = {}): MitmHa
       rejectUnauthorized: up.rejectUnauthorized,
     };
 
-    const upReq = requestFn(options, (upRes) => sendResponse(res, upRes, o.vault));
+    const upReq = requestFn(options, (upRes) => sendResponse(res, upRes, o.vault, o.onRaw));
     upReq.on("error", () => endError(res));
     if (bodyBuf.length) upReq.write(bodyBuf);
     upReq.end();
@@ -291,7 +339,12 @@ export function startMitmProxy(cfg: AegisConfig, opts: MitmOptions = {}): MitmHa
   return { server: proxy, transparentServer, ca };
 }
 
-function sendResponse(res: http.ServerResponse, upRes: http.IncomingMessage, vault: Vault): void {
+function sendResponse(
+  res: http.ServerResponse,
+  upRes: http.IncomingMessage,
+  vault: Vault,
+  onRaw?: (raw: string) => void,
+): void {
   const headers: http.OutgoingHttpHeaders = {};
   for (const [k, v] of Object.entries(upRes.headers)) {
     if (v != null && !STRIP_RESPONSE_HEADERS.has(k.toLowerCase())) headers[k] = v;
@@ -299,10 +352,23 @@ function sendResponse(res: http.ServerResponse, upRes: http.IncomingMessage, vau
   const status = upRes.statusCode ?? 502;
   const ctype = String(upRes.headers["content-type"] ?? "");
 
-  // Nothing was redacted -> stream raw, no rewriting.
-  if (vault.size === 0) {
+  // Nothing to restore (no redactions, no key) -> stream raw. Tee for budget if needed.
+  if (!vault.active) {
     res.writeHead(status, headers);
-    upRes.pipe(res);
+    if (!onRaw) {
+      upRes.pipe(res);
+      return;
+    }
+    const seen: Buffer[] = [];
+    upRes.on("data", (c: Buffer) => {
+      seen.push(c);
+      res.write(c);
+    });
+    upRes.on("end", () => {
+      res.end();
+      onRaw(Buffer.concat(seen).toString("utf8"));
+    });
+    upRes.on("error", () => res.end());
     return;
   }
 
@@ -312,11 +378,19 @@ function sendResponse(res: http.ServerResponse, upRes: http.IncomingMessage, vau
     res.writeHead(status, headers);
     const restorer = new SseRestorer(vault);
     const decoder = new TextDecoder();
-    upRes.on("data", (chunk: Buffer) => res.write(restorer.feed(decoder.decode(chunk, { stream: true }))));
+    let raw = "";
+    upRes.on("data", (chunk: Buffer) => {
+      const txt = decoder.decode(chunk, { stream: true });
+      raw += txt;
+      res.write(restorer.feed(txt));
+    });
     upRes.on("end", () => {
-      res.write(restorer.feed(decoder.decode()));
+      const tail = decoder.decode();
+      raw += tail;
+      res.write(restorer.feed(tail));
       res.write(restorer.end());
       res.end();
+      onRaw?.(raw);
     });
     upRes.on("error", () => res.end());
     return;
@@ -340,14 +414,22 @@ function sendResponse(res: http.ServerResponse, upRes: http.IncomingMessage, vau
     headers["content-length"] = String(Buffer.byteLength(out));
     res.writeHead(status, headers);
     res.end(out);
+    onRaw?.(text);
   });
   upRes.on("error", () => res.end());
 }
 
-function formatForHost(host: string): RouteFormat {
+/**
+ * Map an upstream host to its request body shape. We only return a specific
+ * format when we're confident of the shape; anything ambiguous (Bedrock,
+ * Cohere, Mistral, internal company agents) falls back to "passthrough", which
+ * deep-scrubs every string — safe by default.
+ */
+export function formatForHost(host: string): RouteFormat {
   const h = host.toLowerCase();
   if (h.includes("anthropic")) return "anthropic";
-  if (h.includes("openai")) return "openai";
+  if (h.includes("openai") || h.includes(".openai.azure.com")) return "openai"; // incl. Azure OpenAI
+  if (h.includes("generativelanguage.googleapis.com") || h.includes("gemini")) return "gemini";
   return "passthrough";
 }
 

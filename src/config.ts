@@ -29,20 +29,27 @@ export const DEFAULT_CONFIG: AegisConfig = {
   ],
   defaultUpstream: "https://api.anthropic.com",
   auditLog: "./aegis-audit.log",
+  budget: { enabled: false, windowHours: 24, action: "block" },
+  encryption: { enabled: false },
+  optimize: { enabled: false },
   mitm: {
     port: 8788,
     transparentPort: 8443,
     hosts: [
       "api.anthropic.com",
       "api.openai.com",
+      ".openai.azure.com", // Azure OpenAI (per-resource subdomain) — suffix match
+      "generativelanguage.googleapis.com", // Google Gemini
       "api.cohere.ai",
       "api.cohere.com",
-      "generativelanguage.googleapis.com",
       "api.mistral.ai",
       "api.groq.com",
       "api.perplexity.ai",
       "api.deepseek.com",
       "api.x.ai",
+      // AWS Bedrock and Google Vertex are region-specific hosts
+      // (bedrock-runtime.<region>.amazonaws.com, <region>-aiplatform.googleapis.com)
+      // — add your exact regional host(s) here.
     ],
   },
 };
@@ -55,6 +62,9 @@ function merge(base: AegisConfig, override: Partial<AegisConfig>): AegisConfig {
     detectors: { ...base.detectors, ...(override.detectors ?? {}) },
     code: { ...base.code, ...(override.code ?? {}) },
     mitm: { ...base.mitm, ...(override.mitm ?? {}) },
+    budget: override.budget ? { ...base.budget, ...override.budget } : base.budget,
+    encryption: { enabled: false, ...(base.encryption ?? {}), ...(override.encryption ?? {}) },
+    optimize: { enabled: false, ...(base.optimize ?? {}), ...(override.optimize ?? {}) },
     // Arrays replace wholesale when provided.
     blockOn: override.blockOn ?? base.blockOn,
     dictionary: override.dictionary ?? base.dictionary,

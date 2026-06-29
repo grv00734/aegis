@@ -101,6 +101,15 @@ up the offline, no-API-key design:
   flags secrets that were committed and later "removed."
 - **AI response scanning** — the proxy also scans the model's *output* for newly introduced
   secrets (e.g. a key the AI invented in generated code) and records them as `response` events.
+- **Prompt optimization (token savings)** — an optional local compressor loops safe whitespace
+  passes until the text stops shrinking, cutting tokens on every request **before it leaves** —
+  no AI calls. Savings are recorded per request (`aegis budget`, the activity feed, `aegis
+  optimize <file>` to preview). Conservative by default; `aggressive` removes blank lines and
+  collapses internal spacing for bigger savings.
+- **Token & cost spend control** — per-window token/cost budgets **per service and per employee**,
+  enforced at the proxy (block with `429` or warn), with live spend via `aegis budget` and the
+  dashboard. Employees are identified by a configurable header, then an API-key fingerprint, then
+  the OS user — the key itself is never stored. Usage is read from each provider's `usage` field.
 - **Compliance reporting** — `aegis report` aggregates the audit log into PCI DSS, HIPAA, GDPR,
   and a secrets/SOC2 bucket, over an optional `--since` window, as text or JSON.
 - **Central team policy** — point `policyFile` (or `AEGIS_POLICY`) at a shared partial config;
@@ -113,6 +122,49 @@ up the offline, no-API-key design:
 *optional* local NER model, not a bundled cloud ML service; central policy is a shared file,
 not full SSO/RBAC. These are deliberate trade-offs to keep Aegis offline and key-free. SSO/RBAC
 and a managed model are on the roadmap.
+
+---
+
+## Supported AI services (and adding your own)
+
+Aegis is provider-agnostic. Detection, redaction, and token/cost budgets work across:
+
+| Provider | Request shape | Token usage parsed | Pricing |
+|---|---|---|---|
+| Anthropic (direct / Bedrock / Vertex) | `anthropic` | input/output_tokens | yes |
+| OpenAI | `openai` | prompt/completion_tokens | yes |
+| **Azure OpenAI** | `openai` | prompt/completion_tokens | yes (OpenAI model names) |
+| **Google Gemini / Vertex** | `gemini` | promptTokenCount/candidatesTokenCount | yes |
+| **AWS Bedrock** | passthrough* | input/outputTokenCount | Claude/Llama/Titan |
+| Cohere / Mistral / DeepSeek / Groq | passthrough* | provider variants | yes (common models) |
+| **Any internal company agent** | passthrough* | best-effort + estimate | per-service budget |
+
+\* "passthrough" means Aegis deep-scrubs **every string** in the body — safe by default, it
+over-redacts rather than leak. Add a specific `format` when you want field-precision.
+
+**Add a company-internal agent or a new service** — two places:
+
+1. **Route it** so traffic reaches the guard:
+   - *Base-URL proxy:* add a route in `aegis.config.json`:
+     ```jsonc
+     { "matchPrefix": "/v1/chat", "upstream": "https://ai-gateway.acme-internal.com",
+       "format": "openai", "mode": "redact" }
+     ```
+   - *System / transparent proxy:* add the host to `mitm.hosts` (exact, or a `.suffix`):
+     ```jsonc
+     "mitm": { "hosts": ["ai-gateway.acme-internal.com", "bedrock-runtime.us-east-1.amazonaws.com"] }
+     ```
+2. **Budget it** (optional) — per-service cap + pricing for its model names:
+   ```jsonc
+   "budget": {
+     "enabled": true, "windowHours": 24, "action": "block",
+     "perService": { "ai-gateway.acme-internal.com": { "maxCostUsd": 25 } },
+     "pricing": { "acme-llm": { "input": 1, "output": 3 } }
+   }
+   ```
+
+Budgets are keyed by the **upstream host**, so each service (Azure, Bedrock, your gateway) is
+tracked and capped independently. `aegis budget` and the dashboard show per-service spend.
 
 ---
 
@@ -568,11 +620,13 @@ aegis transparent Print (or --apply as root) the iptables/pf REDIRECT rules.
 aegis app         Open the control panel as a standalone desktop app window.
 aegis gui         Launch the local web control panel (default :8799, --open to open browser).
 aegis status      Check whether the guard is running (probes all ports).
+aegis budget      Show token / cost spend against the configured budget.
 aegis ca          Show / export the root CA and OS trust instructions.
 aegis setup       Auto-route ALL terminals through the base-URL guard ( --undo to revert ).
 aegis scan        Scan a file (or stdin) for findings; exits non-zero so it gates CI/pre-commit.
 aegis scan-history Scan the entire git history for committed secrets.
 aegis report      Compliance report (PCI/HIPAA/GDPR) from the audit log.
+aegis optimize    Preview prompt-compression token savings on a file/stdin.
 aegis init        Write a starter aegis.config.json.
 ```
 
@@ -617,6 +671,8 @@ sensible defaults are used. Generate one with `node dist/cli.js init`.
     "dictionary": true, "code": true, "entropy": false
   },
   "scanResponses": true,        // also scan AI responses for new secrets
+  "encryption": { "enabled": false }, // AES-256-GCM token instead of an index placeholder
+  "optimize": { "enabled": false, "aggressive": false }, // compress prompts to cut tokens
   "nerCommand": "",             // optional: a LOCAL NER command for context-aware PII
   "policyFile": "",             // optional: shared team policy merged over local config
 
@@ -632,6 +688,23 @@ sensible defaults are used. Generate one with `node dist/cli.js init`.
   ],
 
   "mitm": { "port": 8788, "transparentPort": 8443, "hosts": ["api.anthropic.com", "api.openai.com"] },
+
+  // Token / cost spend control across AI services + per employee (off by default)
+  "budget": {
+    "enabled": true,
+    "windowHours": 24,
+    "action": "block",            // block (429) or warn when a limit is hit
+    "maxTokens": 2000000,         // total tokens per window
+    "maxCostUsd": 50,             // total cost per window
+    "maxRequestTokens": 200000,   // hard cap on one request
+    "perService": { "api.openai.com": { "maxCostUsd": 20 } },
+
+    "identifyHeader": "x-aegis-user", // header that names the employee
+    "maxUserTokens": 200000,          // default per-employee token cap
+    "maxUserCostUsd": 10,             // default per-employee cost cap
+    "perUser": { "alice@acme.com": { "maxCostUsd": 50 } }
+  },
+
   "auditLog": "./aegis-audit.log"
 }
 ```
@@ -742,6 +815,13 @@ flowchart LR
 - **Ephemeral vault.** The redact/restore mapping lives in memory for a single request, then is
   discarded. Real values are never written to disk.
 - **Audit log records counts and types only**, safe to ship to a SIEM.
+- **Encryption mode (optional).** With `encryption.enabled`, each confidential value is
+  **AES-256-GCM-encrypted** with a local key and sent to the AI as `[[AEGIS:<ciphertext>]]`; the
+  response is decrypted back. The key lives only at `~/.aegis/redaction.key` (`0600`) and is never
+  sent anywhere. Restoration is **stateless** (survives restarts / works across instances with the
+  same key), and GCM auth means a model-mangled token fails closed instead of producing garbage.
+  Trade-off: ciphertext tokens are longer than index placeholders, so they cost more prompt tokens
+  — the default index-placeholder mode is lighter for everyday use.
 - **MITM decrypts only allowlisted AI hosts**; everything else is blind-tunnelled. The root CA's
   private key never leaves the machine.
 - **Only runtime dependency:** `node-forge` (X.509 certificates). No AI SDK.
@@ -755,6 +835,9 @@ src/
   cli.ts            commands: start, proxy, transparent, status, ca, setup, scan, init
   config.ts         config loader + DEFAULT_CONFIG + central policy merge
   policy.ts         policy-as-code decisions (per-category / per-route actions)
+  budget.ts         token / cost spend control (rolling-window BudgetTracker)
+  crypto.ts         AES-256-GCM encryption mode (local key, encrypt/decrypt tokens)
+  optimize.ts       local prompt compression (loop reduction passes to convergence)
   types.ts          shared types
   server.ts         base-URL proxy bootstrap
   proxy.ts          base-URL request handling (scrub, forward, restore) + /__aegis/health

@@ -20,6 +20,26 @@
 
   "scanResponses": true,
 
+  "encryption": { "enabled": false },
+
+  "optimize": { "enabled": false, "aggressive": false, "maxPasses": 4 },
+
+  "budget": {
+    "enabled": false,
+    "windowHours": 24,
+    "action": "block",
+    "maxTokens": 2000000,
+    "maxCostUsd": 50,
+    "maxRequestTokens": 200000,
+    "perService": {
+      "api.openai.com": { "maxCostUsd": 20 }
+    },
+    "identifyHeader": "x-aegis-user",
+    "maxUserTokens": 200000,
+    "maxUserCostUsd": 10,
+    "perUser": {}
+  },
+
   "dictionary": [
     "Project Phoenix",
     "acme-internal.com",

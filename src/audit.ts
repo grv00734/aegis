@@ -12,6 +12,10 @@ export interface AuditEntry {
   summary: DetectionSummary;
   /** "request" (outbound, default) or "response" (secrets in AI output). */
   direction?: "request" | "response";
+  /** Free-text note for non-DLP events (e.g. a budget block reason). */
+  note?: string;
+  /** Tokens saved by prompt optimization on this request, if any. */
+  savedTokens?: number;
 }
 
 /**
@@ -36,14 +40,21 @@ export class AuditLog {
 
     if (this.sink) {
       this.sink(entry);
-    } else if (summary.total > 0) {
+    } else if (summary.total > 0 || entry.note || entry.savedTokens) {
       // Surface a one-line summary on the console for live visibility.
-      const types = Object.entries(summary.byType)
-        .map(([t, n]) => `${t}:${n}`)
-        .join(", ");
       const tag =
         action === "blocked" ? "BLOCK" : action === "redacted" ? "REDACT" : action === "warned" ? "WARN" : "OK";
-      console.log(`[aegis] ${tag} ${route} — ${summary.total} finding(s) [${types}]`);
+      const saved = entry.savedTokens ? `  (optimized -${entry.savedTokens} tok)` : "";
+      if (entry.note) {
+        console.log(`[aegis] ${tag} ${route} — ${entry.note}${saved}`);
+      } else if (summary.total > 0) {
+        const types = Object.entries(summary.byType)
+          .map(([t, n]) => `${t}:${n}`)
+          .join(", ");
+        console.log(`[aegis] ${tag} ${route} — ${summary.total} finding(s) [${types}]${saved}`);
+      } else {
+        console.log(`[aegis] OPTIMIZE ${route} —${saved}`);
+      }
     }
 
     if (!this.path) return;
