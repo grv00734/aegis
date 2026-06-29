@@ -24,6 +24,18 @@
 
   "optimize": { "enabled": false, "aggressive": false, "maxPasses": 4 },
 
+  "auth": {
+    "enabled": false,
+    "tokens": { "REPLACE_WITH_ADMIN_TOKEN": "admin", "REPLACE_WITH_VIEWER_TOKEN": "viewer" },
+    "jwt": { "algorithm": "RS256", "publicKeyPem": "", "issuer": "", "roleClaim": "role" }
+  },
+
+  "fleet": { "url": "", "token": "" },
+
+  "mcp": { "deniedTools": ["shell", "execute_command", "delete_file"] },
+
+  "nerCommand": "",
+
   "budget": {
     "enabled": false,
     "windowHours": 24,

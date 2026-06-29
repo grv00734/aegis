@@ -117,11 +117,24 @@ up the offline, no-API-key design:
   and detectors across every machine.
 - **Dashboard & desktop app** — a local control panel (`aegis gui`) and a chromeless desktop
   window (`aegis app`) with live status, a redaction tester, policy editor, and activity feed.
+- **RBAC + SSO** — control-plane mutations (change policy, start/stop the guard) require a role.
+  Authenticate with static API tokens or a **bearer JWT verified locally** (HS256 shared secret or
+  RS256 with your IdP's public key — the Okta/Entra/Auth0 integration point). Roles: `viewer` <
+  `operator` < `admin`. Config: `auth`.
+- **Fleet management** — run `aegis fleet` as a central collector; each machine reports its rolling
+  spend, and the collector aggregates **per host and per employee** across the org (token-authed).
+- **MCP security** — MCP (Model Context Protocol) tool calls are recognized; arguments are scrubbed
+  like any payload, and a **tool deny-list** (`mcp.deniedTools`) blocks dangerous tools (shell,
+  file deletion, …) outright before they reach the server.
+- **Local NER bridge** — beyond the built-in name/org/location recognizers, point `nerCommand` at
+  [`scripts/ner_presidio.py`](scripts/ner_presidio.py) to add a local **Presidio/GLiNER** model for
+  context-aware PII — still fully offline.
 
-**Honest about the differences:** the context-aware PII layer is local heuristics plus an
-*optional* local NER model, not a bundled cloud ML service; central policy is a shared file,
-not full SSO/RBAC. These are deliberate trade-offs to keep Aegis offline and key-free. SSO/RBAC
-and a managed model are on the roadmap.
+**Honest about the differences:** RBAC + JWT/OIDC verification is built in, but Aegis is not a
+SAML IdP — it consumes your IdP's tokens rather than replacing it. The bundled recognizers are
+local heuristics; a transformer-grade NER runs via the documented `nerCommand` bridge rather than
+being shipped inside the npm package (to keep it small and offline). Central policy is a shared
+file, not a hosted control plane. These are deliberate trade-offs to stay offline and key-free.
 
 ---
 
@@ -390,7 +403,9 @@ flowchart LR
 | `network` | IPv4 addresses, internal hostnames (`*.internal`, `*.corp`, `*.svc.cluster.local`) |
 | `dictionary` | your codenames, customer names, internal domains (configured) |
 | `code` | `CONFIDENTIAL` / `PROPRIETARY` markers, internal package namespaces |
+| `identity` | person names, street addresses, DOB, IBAN, passport, **organizations, locations** |
 | `entropy` | high-entropy novel tokens regex misses (opt-in; off by default) |
+| `ner` (optional) | local Presidio/GLiNER model via `nerCommand` for context-aware PII |
 
 ---
 
@@ -461,7 +476,7 @@ git clone <repo-url>
 cd B2B
 npm install        # installs deps (node-forge for certificates; dev: typescript, vitest, tsx)
 npm run build      # compiles TypeScript to dist/
-npm test           # runs the 31-test suite (optional but recommended)
+npm test           # runs the 119-test suite (optional but recommended)
 ```
 
 After `npm run build`, the CLI entry point is `dist/cli.js`. Run it with `node dist/cli.js <command>`.
@@ -627,6 +642,7 @@ aegis scan        Scan a file (or stdin) for findings; exits non-zero so it gate
 aegis scan-history Scan the entire git history for committed secrets.
 aegis report      Compliance report (PCI/HIPAA/GDPR) from the audit log.
 aegis optimize    Preview prompt-compression token savings on a file/stdin.
+aegis fleet       Run the central fleet collector (aggregate spend across machines).
 aegis init        Write a starter aegis.config.json.
 ```
 
@@ -838,6 +854,10 @@ src/
   budget.ts         token / cost spend control (rolling-window BudgetTracker)
   crypto.ts         AES-256-GCM encryption mode (local key, encrypt/decrypt tokens)
   optimize.ts       local prompt compression (loop reduction passes to convergence)
+  auth.ts           RBAC + token/JWT (SSO) verification for the control plane
+  fleet.ts          fleet collector + aggregator + agent reporting
+  mcp.ts            MCP JSON-RPC detection + tool deny-list
+scripts/ner_presidio.py  ready-to-use local NER for the nerCommand hook
   types.ts          shared types
   server.ts         base-URL proxy bootstrap
   proxy.ts          base-URL request handling (scrub, forward, restore) + /__aegis/health
@@ -859,7 +879,8 @@ src/
     placeholders.ts Vault (ephemeral redact/restore map)
     detectors/      secrets, pii, identity, ner, network, dictionary, code, util
 extension/          VS Code extension (wraps the engine)
-test/               31 tests: detectors, roundtrip, stream, ca, mitm, sni
+test/               119 tests: detectors, identity, entropy, roundtrip, stream, crypto, optimize,
+                    policy, budget, providers, ca, mitm, sni, report, history, samples, enterprise
 ```
 
 ---
@@ -867,25 +888,53 @@ test/               31 tests: detectors, roundtrip, stream, ca, mitm, sni
 ## Testing
 
 ```bash
-npm test          # all suites
+npm test          # 119 unit tests across 18 suites
 npm run test:watch
 ```
 
 ```mermaid
 flowchart LR
-    subgraph Suite["31 tests"]
+    subgraph Suite["119 unit tests · 18 suites"]
         D["detectors<br/>secrets/pii/dictionary/code"]
+        ID["identity<br/>names/address/DOB/IBAN"]
+        EN["entropy<br/>novel high-entropy tokens"]
         R["roundtrip<br/>redact then restore + body walkers"]
         S["stream<br/>split-placeholder SSE restore"]
+        CR["crypto<br/>AES-256-GCM encrypt/decrypt + key"]
+        OP["optimize<br/>compression convergence"]
+        PO["policy<br/>per-category/route + allowlist"]
+        BU["budget<br/>token/cost + per-employee caps"]
+        PR["providers<br/>Azure/Gemini/Bedrock usage + format"]
         CA["ca<br/>leaf validates vs root (real TLS)"]
-        M["mitm<br/>e2e scrub/restore + blind-tunnel + transparent SNI"]
+        M["mitm<br/>scrub/restore + blind-tunnel + transparent SNI"]
         SN["sni<br/>ClientHello parse + iptables/pf rules"]
+        RP["report<br/>PCI/HIPAA/GDPR mapping"]
+        HI["history<br/>git-history secret scan"]
+        SA["samples<br/>real fixture files"]
+        EN2["enterprise<br/>RBAC/JWT + fleet + MCP + orgs/locations"]
     end
 ```
 
-Verified end-to-end: the provider receives only placeholders; the client gets real values
-restored (even across split stream chunks); minted leaf certs validate against the root over
-real TLS; non-AI hosts are never decrypted.
+### Live end-to-end harness
+
+Beyond the unit tests, a live harness starts real Aegis proxies in front of a fake AI upstream
+and drives them over HTTP, asserting the whole pipeline (**21 checks across 9 scenarios**):
+
+| Scenario | Verified |
+|---|---|
+| Redact + restore | upstream gets placeholders only; client reply restores the real value |
+| Clean passthrough | original text forwarded, `200` |
+| Policy block | secret → `403`, never forwarded |
+| Optimization | blank lines/extra spacing removed before sending |
+| Per-employee budget | over-cap employee → `429`; others unaffected |
+| Encryption mode | upstream gets `[[AEGIS:…]]` ciphertext; client reply decrypted |
+| Response scanning | a secret in the AI's output is flagged (`direction: response`) |
+| Multi-provider (Gemini) | `contents[].parts[].text` scrubbed |
+| Health endpoint | `{"status":"ok"}` |
+
+Verified end-to-end: the provider receives only placeholders/ciphertext; the client gets real
+values restored (even across split stream chunks); minted leaf certs validate against the root
+over real TLS; non-AI hosts are never decrypted.
 
 ---
 

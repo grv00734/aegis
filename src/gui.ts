@@ -18,6 +18,7 @@ import { buildReport } from "./report.js";
 import { BudgetTracker } from "./budget.js";
 import { loadOrCreateKey } from "./crypto.js";
 import { optimizeText } from "./optimize.js";
+import { authenticate, can, type Action } from "./auth.js";
 import { dashboardHtml } from "./gui-page.js";
 
 interface SystemHandle {
@@ -216,13 +217,31 @@ export function startGui(cfg: AegisConfig, guiPort: number): Server {
         return json(res, 200, state.scan(body.text ?? ""));
       }
 
+      // --- RBAC gate for control-plane mutations ---
+      const gate = (action: Action): boolean => {
+        const auth = cfg.auth;
+        if (!auth?.enabled) return true;
+        const who = authenticate(req.headers as Record<string, unknown>, auth);
+        if (!who) {
+          json(res, 401, { error: "authentication required" });
+          return false;
+        }
+        if (!can(who.role, action)) {
+          json(res, 403, { error: `role '${who.role}' lacks '${action}' permission` });
+          return false;
+        }
+        return true;
+      };
+
       if (path === "/api/config" && method === "POST") {
+        if (!gate("configure")) return;
         const body = (await readJson(req)) as Partial<AegisConfig>;
         state.applyConfig(body);
         return json(res, 200, state.status());
       }
 
       if (path === "/api/proxy/start" && method === "POST") {
+        if (!gate("control")) return;
         const body = (await readJson(req)) as { kind?: string };
         if (body.kind === "system") state.startSystem();
         else state.startBase();
@@ -230,6 +249,7 @@ export function startGui(cfg: AegisConfig, guiPort: number): Server {
       }
 
       if (path === "/api/proxy/stop" && method === "POST") {
+        if (!gate("control")) return;
         const body = (await readJson(req)) as { kind?: string };
         if (body.kind === "system") state.stopSystem();
         else state.stopBase();

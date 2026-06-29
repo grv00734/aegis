@@ -32,6 +32,8 @@ export const DEFAULT_CONFIG: AegisConfig = {
   budget: { enabled: false, windowHours: 24, action: "block" },
   encryption: { enabled: false },
   optimize: { enabled: false },
+  auth: { enabled: false },
+  mcp: { deniedTools: [] },
   mitm: {
     port: 8788,
     transparentPort: 8443,
@@ -65,6 +67,9 @@ function merge(base: AegisConfig, override: Partial<AegisConfig>): AegisConfig {
     budget: override.budget ? { ...base.budget, ...override.budget } : base.budget,
     encryption: { enabled: false, ...(base.encryption ?? {}), ...(override.encryption ?? {}) },
     optimize: { enabled: false, ...(base.optimize ?? {}), ...(override.optimize ?? {}) },
+    auth: { enabled: false, ...(base.auth ?? {}), ...(override.auth ?? {}) },
+    fleet: override.fleet ?? base.fleet,
+    mcp: { ...(base.mcp ?? {}), ...(override.mcp ?? {}) },
     // Arrays replace wholesale when provided.
     blockOn: override.blockOn ?? base.blockOn,
     dictionary: override.dictionary ?? base.dictionary,

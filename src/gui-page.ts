@@ -353,7 +353,7 @@ const PAGE = `<!doctype html>
     var text=$("input").value;
     if(!text){$("detected").innerHTML='<span class="ttl">Detected (highlighted)</span><span class="empty">No findings yet.</span>';
       $("redacted").innerHTML='<span class="ttl">Sent to the AI (scrubbed)</span><span class="empty">—</span>';
-      $("count").textContent="0";$("copyBtn").disabled=true;return}
+      $("count").textContent="0";$("savedChip").style.display="none";$("copyBtn").disabled=true;return}
     api("/api/scan","POST",{text:text}).then(function(r){
       lastRedacted=r.redacted;
       $("detected").innerHTML='<span class="ttl">Detected (highlighted)</span>'+highlight(text,r.findings);

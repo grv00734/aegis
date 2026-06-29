@@ -1,6 +1,8 @@
 import { createServer, type Server } from "node:http";
+import { hostname } from "node:os";
 import type { AegisConfig } from "./types.js";
 import { createContext, handleRequest, type ContextOptions } from "./proxy.js";
+import { reportFromBudget, reportToFleet } from "./fleet.js";
 
 export function startServer(cfg: AegisConfig, opts: ContextOptions = {}): Server {
   const ctx = createContext(cfg, opts);
@@ -29,6 +31,15 @@ export function startServer(cfg: AegisConfig, opts: ContextOptions = {}): Server
     console.log(`\n  Point your agent at this proxy, e.g.:`);
     console.log(`    export ANTHROPIC_BASE_URL=http://${cfg.host}:${cfg.port}\n`);
   });
+
+  // Periodically report this machine's spend to the fleet collector (if configured).
+  if (cfg.fleet?.url) {
+    const timer = setInterval(() => {
+      void reportToFleet(cfg.fleet!.url!, cfg.fleet!.token, reportFromBudget(hostname(), ctx.budget?.snapshot() ?? null));
+    }, 30_000);
+    timer.unref?.();
+    server.on("close", () => clearInterval(timer));
+  }
 
   return server;
 }

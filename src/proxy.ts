@@ -9,6 +9,7 @@ import { decide } from "./policy.js";
 import { BudgetTracker, estimateTokens, extractUsage, costOf, identifyUser } from "./budget.js";
 import { loadOrCreateKey } from "./crypto.js";
 import { optimizeText } from "./optimize.js";
+import { mcpDenied } from "./mcp.js";
 
 export interface ContextOptions {
   /** Route audit entries to a custom sink instead of the console. */
@@ -155,6 +156,19 @@ export async function handleRequest(
     try {
       const parsed = JSON.parse(rawBody.toString("utf8"));
       if (typeof parsed?.model === "string") model = parsed.model;
+
+      // MCP tool deny-list (block disallowed tool calls outright).
+      const deniedTool = mcpDenied(parsed, cfg.mcp?.deniedTools);
+      if (deniedTool) {
+        await audit.record({
+          ts: new Date().toISOString(), route: url.pathname, format: route.format, mode: cfg.mode,
+          action: "blocked", note: `MCP tool '${deniedTool}' is denied by policy`, summary: summarize([]),
+        });
+        res.writeHead(403, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { type: "aegis_mcp_denied", message: `MCP tool '${deniedTool}' is blocked by policy.` } }));
+        return;
+      }
+
       const scrubVault = new Vault(ctx.encKey);
       const { body: scrubbed, matches } = scrubRequestBody(parsed, route.format, scrubber, scrubVault, optimizeFn);
       summary = summarize(matches);
