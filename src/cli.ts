@@ -17,6 +17,7 @@ import { launchApp } from "./app.js";
 import { scanHistory } from "./history.js";
 import { buildReport, formatReportText, parseAuditFile } from "./report.js";
 import { optimizeText } from "./optimize.js";
+import { startFleetCollector } from "./fleet.js";
 import { spawn } from "node:child_process";
 
 function parseFlags(args: string[]): { positionals: string[]; flags: Record<string, string> } {
@@ -289,6 +290,14 @@ function cmdSetup(flags: Record<string, string>): void {
   console.log(`Undo any time with: aegis setup --undo`);
 }
 
+function cmdFleet(flags: Record<string, string>): void {
+  const cfg = loadConfig(flags.config);
+  const port = flags.port ? Number(flags.port) : 8790;
+  const token = flags.token ?? cfg.fleet?.token;
+  startFleetCollector({ port, host: flags.host, token });
+  if (!token) console.log("  WARNING: no --token set; the collector accepts unauthenticated reports.");
+}
+
 function cmdOptimize(positionals: string[], flags: Record<string, string>): void {
   const cfg = loadConfig(flags.config);
   const file = positionals[0];
@@ -395,6 +404,9 @@ function main(): void {
     case "optimize":
       cmdOptimize(positionals, flags);
       break;
+    case "fleet":
+      cmdFleet(flags);
+      break;
     case "report":
       cmdReport(flags);
       break;
@@ -464,6 +476,8 @@ Usage:
       Compliance report (PCI/HIPAA/GDPR) from the audit log.
   aegis optimize    [file] [--aggressive] [--print]
       Preview prompt-compression token savings on a file (or stdin).
+  aegis fleet       [--port <n>] [--token <t>]
+      Run the fleet collector that aggregates spend across machines/employees.
   aegis init                                  Write a starter aegis.config.json
 
 Examples:

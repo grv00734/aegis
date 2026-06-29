@@ -82,6 +82,12 @@ export interface AegisConfig {
   encryption?: { enabled: boolean };
   /** Local prompt compression to cut tokens before requests leave (no AI calls). */
   optimize?: OptimizeConfig;
+  /** RBAC / SSO for the control plane (dashboard API, config, fleet). */
+  auth?: import("./auth.js").AuthConfig;
+  /** Report audit/spend to a central fleet collector. */
+  fleet?: { url?: string; token?: string };
+  /** MCP (Model Context Protocol) tool security. */
+  mcp?: { deniedTools?: string[] };
   dictionary: string[];
   code: {
     markers: string[];

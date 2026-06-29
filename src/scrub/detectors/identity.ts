@@ -61,6 +61,18 @@ const PATTERNS: PatternSpec[] = [
     flags: "i",
     group: 1,
   },
+  // Organization (company suffixes) — closes part of the NER gap locally
+  {
+    type: "ORGANIZATION",
+    severity: "medium",
+    source: "\\b[A-Z][A-Za-z0-9&.\\- ]{1,40}?\\s(?:Inc|LLC|Ltd|Corp|Corporation|GmbH|PLC|LLP|Co)\\b\\.?",
+  },
+  // Location as "City, ST 12345"
+  {
+    type: "LOCATION",
+    severity: "low",
+    source: "\\b[A-Z][a-zA-Z]+(?:\\s[A-Z][a-zA-Z]+){0,2},\\s[A-Z]{2}\\s\\d{5}(?:-\\d{4})?\\b",
+  },
   // IBAN
   { type: "IBAN", severity: "high", source: "\\b[A-Z]{2}\\d{2}[A-Z0-9]{11,30}\\b" },
   // Passport (labelled)
